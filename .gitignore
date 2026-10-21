@@ -11,3 +11,8 @@ weights/mocap.npz
 weights/mocap_bvh/
 weights/pseudo/
 weights/exam/
+orbis_app.json
+Orbis.exe
+build/
+weights/orbis*.pt
+weights/test*.pt
