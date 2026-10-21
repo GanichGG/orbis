@@ -11,7 +11,7 @@ from model import load, predict, peaks
 
 def synth_eval(model, n=400, seed=12345):
     rng = np.random.default_rng(seed)
-    X, K = zip(*[synth.make_sample(rng) for _ in range(n)])
+    X, K, _ = zip(*[synth.make_sample(rng) for _ in range(n)])
     H = predict(model, np.stack(X))
     groups = {"head": [0], "neck": [1], "hip": [2], "hands": [3, 4], "feet": [5, 6]}
     res = {}

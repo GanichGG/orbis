@@ -1,11 +1,14 @@
-"""Модель StickPose: силуэт (2 канала, 128x128) -> 5 карт вероятности (64x64):
-голова, шея, таз, кисти, стопы. Небольшая U-Net, работает и на CPU, и на видеокарте."""
+"""Модель StickPose (Orbis): силуэты (4 канала, 128x128: свой, чужие, свой в прошлом и следующем кадре)
+-> 5 карт вероятности (64x64): голова, шея, таз, кисти, стопы + 6-я карта «скелет тела» (вспомогательная).
+Небольшая U-Net, работает и на CPU, и на видеокарте. Веса v1 (2 канала -> 5 карт) тоже загружаются."""
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from synth import S, HM, CH
+from synth import S, HM, CH, CIN
+
+NOUT = len(CH) + 1   # + карта костей
 
 
 def block(ci, co):
@@ -15,9 +18,9 @@ def block(ci, co):
 
 
 class StickPose(nn.Module):
-    VERSION = 1
+    VERSION = 2
 
-    def __init__(self, w=32, cin=2, cout=len(CH)):
+    def __init__(self, w=32, cin=CIN, cout=NOUT):
         super().__init__()
         self.cfg = {"w": w, "cin": cin, "cout": cout}
         c = [w, w * 2, w * 3, w * 4, w * 5]
@@ -52,9 +55,29 @@ def save(model, path, extra=None):
 
 def load(path, device="cpu"):
     ck = torch.load(path, map_location=device, weights_only=False)
-    m = StickPose(**ck["cfg"])
+    cfg = {"cin": 2, "cout": len(CH), **ck["cfg"]}   # у весов v1 в cfg могло не быть cin/cout
+    m = StickPose(**cfg)
     m.load_state_dict(ck["state"])
     return m.to(device).eval()
+
+
+def upgrade(old, cin=CIN, cout=NOUT):
+    """Модель v1 (2 канала -> 5 карт) -> v2 с теми же знаниями: новые входы и выход костей начинают с нуля,
+    так что сначала она отвечает как старая, а обучение учит её пользоваться соседними кадрами."""
+    m = StickPose(w=old.cfg["w"], cin=cin, cout=cout).to(next(old.parameters()).device)
+    sd = m.state_dict()
+    for k, v in old.state_dict().items():
+        t = sd[k]
+        if t.shape == v.shape:
+            t.copy_(v)
+        elif k == "e0.0.weight":
+            t.zero_()
+            t[:, :v.shape[1]] = v
+        elif k.startswith("out."):
+            t.zero_() if k.endswith("weight") else t.fill_(-4.0)
+            t[:v.shape[0]] = v
+    m.load_state_dict(sd)
+    return m.train(old.training)
 
 
 def device():
@@ -63,10 +86,25 @@ def device():
 
 @torch.no_grad()
 def predict(model, x, dev=None):
-    """x (B,2,S,S) numpy -> вероятности (B,5,HM,HM) numpy."""
+    """x (B,C,S,S) numpy (0..1 или uint8 0..255) -> вероятности (B,cout,HM,HM) numpy.
+    Лишние каналы отбрасываются, недостающие соседние кадры заменяются текущим (как будто стоит на месте)."""
     dev = dev or next(model.parameters()).device
+    x = fit_channels(x, model.cfg["cin"])
     t = torch.from_numpy(np.ascontiguousarray(x)).float().to(dev)
+    if x.dtype == np.uint8:
+        t = t / 255.0
     return torch.sigmoid(model(t)).cpu().numpy()
+
+
+def fit_channels(x, cin):
+    """(B,C,S,S) или (C,S,S) -> ровно cin каналов (для смеси моделей/данных v1 и v2)."""
+    c = x.shape[-3]
+    if c > cin:
+        return x[..., :cin, :, :]
+    if c < cin:
+        extra = [x[..., :1, :, :]] * (cin - c)
+        return np.concatenate([x] + extra, axis=-3)
+    return x
 
 
 def peaks(hm, k=4, thr=0.08):

@@ -1,10 +1,11 @@
-"""Обучение StickPose на синтетике (и, при наличии, на размеченных кадрах реальных видео).
+"""Обучение StickPose (Orbis) на синтетике (и, при наличии, на размеченных кадрах реальных видео).
 
-    python train.py --steps 20000 --out stickpose.pt            # с нуля
-    python train.py --resume stickpose.pt --steps 10000          # продолжить
+    python train.py --steps 20000 --out orbis.pt                 # с нуля
+    python train.py --resume старые.pt --steps 10000 --out orbis.pt   # дообучить (веса v1 сами станут v2)
+    python train.py --resume orbis.pt --out orbis.pt             # если обучение оборвалось — продолжит с того же шага
     python train.py --real labels_dir --steps 5000               # добавить реальные разметки (*.npz)
 
-Сам использует видеокарту, если есть (CUDA).
+Сам использует видеокарту, если есть (CUDA). Каждые 200 шагов сохраняет веса и состояние обучения в --out.
 """
 import argparse
 import os
@@ -15,7 +16,7 @@ import torch
 import torch.nn.functional as F
 
 import synth
-from model import StickPose, save, load, device
+from model import StickPose, save, load, device, upgrade, fit_channels
 
 
 class SynthStream(torch.utils.data.IterableDataset):
@@ -28,14 +29,18 @@ class SynthStream(torch.utils.data.IterableDataset):
         while True:
             if self.real is not None and rng.random() < self.real_frac:
                 x, kp = augment_real(rng, *self.real[rng.integers(len(self.real))])
+                bones = np.full((synth.HM, synth.HM), -1, np.float32)   # костей у реальных нет — не учить
             else:
-                x, kp = synth.make_sample(rng)
-            yield torch.from_numpy(x), torch.from_numpy(synth.heatmaps(kp))
+                x, kp, bones = synth.make_sample(rng)
+            y = np.concatenate([synth.heatmaps(kp), bones[None]])
+            yield torch.from_numpy(x), torch.from_numpy(y)
 
 
 def augment_real(rng, x, kp):
     """Лёгкая аугментация реального примера: поворот/масштаб/сдвиг/зеркало."""
     import cv2
+    x = fit_channels(np.asarray(x), synth.CIN)
+    x = x.astype(np.float32) / (255.0 if x.dtype == np.uint8 else 1.0)
     a = rng.normal(0, 12)
     s = rng.uniform(0.85, 1.15)
     M = cv2.getRotationMatrix2D((synth.S / 2, synth.S / 2), a, s)
@@ -50,25 +55,41 @@ def augment_real(rng, x, kp):
 
 def loss_fn(logits, target):
     p = torch.sigmoid(logits)
-    w = 1.0 + 20.0 * target
-    return (w * (p - target) ** 2).mean()
+    nk = len(synth.CH)
+    pk, tk = p[:, :nk], target[:, :nk]
+    loss = ((1.0 + 20.0 * tk) * (pk - tk) ** 2).mean()
+    if logits.shape[1] > nk:  # карта костей (там, где она известна: у синтетики)
+        pb, tb = p[:, nk], target[:, nk]
+        m = (tb >= 0).float()
+        loss = loss + 0.5 * (m * (1.0 + 5.0 * tb) * (pb - tb) ** 2).sum() / (m.sum() + 1.0)
+    return loss
 
 
 def train(model, steps, lr=2e-3, bs=32, real=None, real_frac=0.0, log_every=200, workers=None, ckpt=None,
-          on_log=None):
+          on_log=None, state=None):
+    """state — состояние оборванного обучения из чекпойнта (шаг, оптимизатор, расписание): продолжить с него."""
     dev = next(model.parameters()).device
     ds = SynthStream(real=real, real_frac=real_frac)
-    if workers is None:
-        workers = max(1, min(6, (os.cpu_count() or 2) - 1))
-    dl = torch.utils.data.DataLoader(ds, batch_size=bs, num_workers=workers, persistent_workers=workers > 0)
+    if workers is None:  # синтетику рисует процессор — это узкое место, отдаём ему почти все потоки
+        workers = max(1, min(10, (os.cpu_count() or 2) - 2))
+    dl = torch.utils.data.DataLoader(ds, batch_size=bs, num_workers=workers, persistent_workers=workers > 0,
+                                     pin_memory=dev.type == "cuda")
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps, pct_start=0.1)
+    first = 1
+    if state:
+        opt.load_state_dict(state["opt"])
+        sched.load_state_dict(state["sched"])
+        first = state["steps"] + 1
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = True
     model.train()
     it = iter(dl)
     t0, run = time.time(), 0.0
-    for step in range(1, steps + 1):
+    for step in range(first, steps + 1):
         x, y = next(it)
         x, y = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True)
+        x, y = x[:, :model.cfg["cin"]], y[:, :model.cfg["cout"]]   # модель v1 (дообучение в программе) берёт меньше
         loss = loss_fn(model(x), y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -76,10 +97,11 @@ def train(model, steps, lr=2e-3, bs=32, real=None, real_frac=0.0, log_every=200,
         sched.step()
         run = 0.98 * run + 0.02 * loss.item() if step > 1 else loss.item()
         if step % log_every == 0 or step == steps:
-            msg = f"шаг {step}/{steps}  loss {run:.4f}  {(time.time() - t0) / step:.2f} с/шаг"
+            msg = f"шаг {step}/{steps}  loss {run:.4f}  {(time.time() - t0) / (step - first + 1):.2f} с/шаг"
             (on_log or print)(msg)
-            if ckpt:
-                save(model, ckpt, {"steps": step})
+            if ckpt and step < steps:
+                save(model, ckpt, {"steps": step, "total": steps, "lr": lr, "bs": bs,
+                                   "opt": opt.state_dict(), "sched": sched.state_dict()})
     model.eval()
     return model
 
@@ -90,7 +112,8 @@ def load_real(d):
         for fn in sorted(os.listdir(d)):
             if fn.endswith(".npz"):
                 z = np.load(os.path.join(d, fn))
-                out += list(zip(z["x"].astype(np.float32), z["kp"].astype(np.float32)))
+                x = z["x"] if z["x"].dtype == np.uint8 else z["x"].astype(np.float32)
+                out += list(zip(x, z["kp"].astype(np.float32)))
     return out or None
 
 
@@ -108,12 +131,24 @@ def main():
     a = ap.parse_args()
     dev = device()
     print("устройство:", dev)
-    model = load(a.resume, dev).train() if a.resume else StickPose(w=a.width).to(dev)
+    state = None
+    if a.resume:
+        model = load(a.resume, dev).train()
+        if model.cfg["cin"] != synth.CIN or model.cfg["cout"] != len(synth.CH) + 1:
+            print("веса v1 -> Orbis v2 (соседние кадры + карта костей), знания старой модели сохраняются")
+            model = upgrade(model).train()
+        ex = torch.load(a.resume, map_location="cpu", weights_only=False).get("extra", {})
+        if "opt" in ex and ex["steps"] < ex["total"]:
+            state = ex
+            a.steps, a.lr, a.bs = ex["total"], ex["lr"], ex["bs"]
+            print(f"продолжаю оборванное обучение с шага {ex['steps']} из {ex['total']}")
+    else:
+        model = StickPose(w=a.width).to(dev)
     print("параметров:", sum(p.numel() for p in model.parameters()))
     real = load_real(a.real)
     if real:
         print("реальных примеров:", len(real))
-    train(model, a.steps, a.lr, a.bs, real, a.real_frac if real else 0.0, workers=a.workers, ckpt=a.out)
+    train(model, a.steps, a.lr, a.bs, real, a.real_frac if real else 0.0, workers=a.workers, ckpt=a.out, state=state)
     save(model, a.out, {"steps": a.steps})
     print("сохранено:", a.out)
 
