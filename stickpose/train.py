@@ -20,15 +20,19 @@ from model import StickPose, save, load, device, upgrade, fit_channels
 
 
 class SynthStream(torch.utils.data.IterableDataset):
-    def __init__(self, seed=0, real=None, real_frac=0.0):
+    def __init__(self, seed=0, real=None, real_frac=0.0, pseudo=None, pseudo_frac=0.0):
         self.seed, self.real, self.real_frac = seed, real, real_frac
+        self.pseudo, self.pseudo_frac = pseudo, pseudo_frac
 
     def __iter__(self):
         wi = torch.utils.data.get_worker_info()
         rng = np.random.default_rng(self.seed + (wi.id if wi else 0) * 7919 + int(time.time()))
         while True:
-            if self.real is not None and rng.random() < self.real_frac:
-                x, kp = augment_real(rng, *self.real[rng.integers(len(self.real))])
+            r = rng.random()
+            pool = (self.real if self.real is not None and r < self.real_frac else
+                    self.pseudo if self.pseudo is not None and r < self.real_frac + self.pseudo_frac else None)
+            if pool is not None:  # реальные разметки / уверенные кадры самообучения
+                x, kp = augment_real(rng, *pool[rng.integers(len(pool))])
                 bones = np.full((synth.HM, synth.HM), -1, np.float32)   # костей у реальных нет — не учить
             else:
                 x, kp, bones = synth.make_sample(rng)
@@ -66,10 +70,10 @@ def loss_fn(logits, target):
 
 
 def train(model, steps, lr=2e-3, bs=32, real=None, real_frac=0.0, log_every=200, workers=None, ckpt=None,
-          on_log=None, state=None):
+          on_log=None, state=None, pseudo=None, pseudo_frac=0.0):
     """state — состояние оборванного обучения из чекпойнта (шаг, оптимизатор, расписание): продолжить с него."""
     dev = next(model.parameters()).device
-    ds = SynthStream(real=real, real_frac=real_frac)
+    ds = SynthStream(real=real, real_frac=real_frac, pseudo=pseudo, pseudo_frac=pseudo_frac if pseudo else 0.0)
     if workers is None:  # синтетику рисует процессор — это узкое место, отдаём ему почти все потоки
         workers = max(1, min(10, (os.cpu_count() or 2) - 2))
     dl = torch.utils.data.DataLoader(ds, batch_size=bs, num_workers=workers, persistent_workers=workers > 0,
@@ -131,6 +135,8 @@ def main():
     ap.add_argument("--resume", default=None)
     ap.add_argument("--real", default=None, help="папка с реальными разметками *.npz")
     ap.add_argument("--real_frac", type=float, default=0.3)
+    ap.add_argument("--pseudo", default=None, help="папка с кадрами самообучения (tools/selftrain.py)")
+    ap.add_argument("--pseudo_frac", type=float, default=0.25)
     ap.add_argument("--workers", type=int, default=None)
     a = ap.parse_args()
     dev = device()
@@ -152,7 +158,11 @@ def main():
     real = load_real(a.real)
     if real:
         print("реальных примеров:", len(real))
-    train(model, a.steps, a.lr, a.bs, real, a.real_frac if real else 0.0, workers=a.workers, ckpt=a.out, state=state)
+    pseudo = load_real(a.pseudo)
+    if pseudo:
+        print("кадров самообучения:", len(pseudo))
+    train(model, a.steps, a.lr, a.bs, real, a.real_frac if real else 0.0, workers=a.workers, ckpt=a.out, state=state,
+          pseudo=pseudo, pseudo_frac=a.pseudo_frac)
     save(model, a.out, {"steps": a.steps})
     print("сохранено:", a.out)
 
