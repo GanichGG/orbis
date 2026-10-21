@@ -20,10 +20,10 @@ HERE = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, "frozen", Fal
 CFG = os.path.join(HERE, "orbis_app.json")
 VIDEO_EXT = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v")
 
-# два тёмно-серых, как в тёмной теме Firefox: фон окна и панели. Элементы внутри панели — цветом фона.
+# два тёмно-серых (нейтральных, без синевы): фон окна и панели. Элементы внутри панели — цветом фона.
 # Без обводок; наведение — чуть светлее панели. Текст — светлый и приглушённый.
-BG, PANEL, HOVER = "#1c1b22", "#2b2a33", "#34333c"
-TEXT, DIM = "#fbfbfe", "#9f9ea8"
+BG, PANEL, HOVER = "#141414", "#1f1f1f", "#282828"
+TEXT, DIM = "#ededed", "#8f8f8f"
 C = {"bg": BG, "panel": PANEL, "card": PANEL, "field": BG, "line": BG, "btn": BG, "btn_hover": HOVER,
      "main": BG, "main_hover": HOVER, "main_text": TEXT, "sel": BG, "text": TEXT, "dim": DIM, "faint": DIM, "bar": DIM}
 R = 16          # скругление панелей
