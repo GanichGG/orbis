@@ -24,7 +24,9 @@ ROOT_MOTION = True
 LOOK_DIST = 3.0
 LEG_MODE = "plant"        # "plant" — стопы ставятся в реальные точки, колено гнётся (R6-нога по голени, стопы не скользят)
                           # "straight" — R6-нога точно по линии таз→стопа (поза как у стикмена, без сгиба)
-KEYS_ONLY = True          # ключи только на ключевых кадрах из файла (между ними — гладкие кривые)
+KEYS_ONLY = True          # ключи только на ключевых кадрах из файла
+INTERP = "LINEAR"         # между ключами: "LINEAR" — как выбирались ключи (без замедлений у каждого ключа),
+                          # "BEZIER" — плавные кривые Blender, "CONSTANT" — ступеньками (покадровая анимация)
 
 FK = {"l_hand": "LeftArm_FK", "r_hand": "RightArm_FK", "head": "Head"}
 IK_OF = {"l_hand": "LeftLowerArm", "r_hand": "RightLowerArm", "l_foot": "LeftLowerLeg", "r_foot": "RightLowerLeg"}
@@ -298,9 +300,15 @@ def run(path):
     if CHARACTER:
         chars = [chars[CHARACTER - 1]]
     done = []
-    for rig, ch in zip(rigs, chars):
-        apply_character(rig, ch, data)
-        done.append(f"{ch['name']} -> {rig.name}")
+    prefs = bpy.context.preferences.edit
+    old_interp = prefs.keyframe_new_interpolation_type
+    prefs.keyframe_new_interpolation_type = INTERP
+    try:
+        for rig, ch in zip(rigs, chars):
+            apply_character(rig, ch, data)
+            done.append(f"{ch['name']} -> {rig.name}")
+    finally:
+        prefs.keyframe_new_interpolation_type = old_interp
     scn.frame_start = 1
     scn.frame_end = max(len(c["frames"]) for c in chars)
     scn.frame_set(1)
