@@ -61,6 +61,7 @@ segs = {"Torso": ("hip", "neck", 1), "Head": ("neck", "head", 1),
 W = P.matrix_world.to_3x3()
 sg = 1.0 if ch.get("facing", "r") == "r" else -1.0
 err = {k: [] for k in segs}
+dist = {}
 for f in range(len(F)):
     bpy.context.scene.frame_set(f + 1)
     e = I.evaluated_get(bpy.context.evaluated_depsgraph_get())
@@ -72,6 +73,20 @@ for f in range(len(F)):
         v = F[f, Jn[b]] - F[f, Jn[a]]
         gt = (W @ Vector((0, sg * v[0], -v[1]))).normalized()
         err[part].append(math.degrees(math.acos(max(-1, min(1, d.dot(gt))))))
+    # конец блока R6 (низ руки/ноги) против кисти/стопы стикмена — в шпильках, в плоскости вида сбоку
+    tb = I.data.bones["Torso"]
+    hipw = I.matrix_world @ (e.pose.bones["Torso"].matrix @ tb.matrix_local.inverted()
+                             @ (tb.head_local + I.matrix_world.inverted().to_3x3() @ Vector((0, 0, -1))))
+    sc = 2.0 / np.linalg.norm(F[f, Jn["neck"]] - F[f, Jn["hip"]])
+    for part, j, off in (("Left Arm", "l_hand", (-0.5, 0, -2.5)), ("Right Arm", "r_hand", (0.5, 0, -2.5)),
+                         ("Left Leg", "l_foot", (0.5, 0, -2.0)), ("Right Leg", "r_foot", (-0.5, 0, -2.0))):
+        pb, bone = e.pose.bones[part], I.data.bones[part]
+        endw = I.matrix_world @ (pb.matrix @ bone.matrix_local.inverted() @ (bone.head_local + Vector(off)))
+        v = (F[f, Jn[j]] - F[f, Jn["hip"]]) * sc
+        tw = hipw + W @ Vector((0, sg * v[0], -v[1]))
+        dist.setdefault(part, []).append(math.hypot(endw.y - tw.y, endw.z - tw.z))
+for k, v in dist.items():
+    print(f"{k:10s} конец блока от кисти/стопы: ср {np.mean(v):.2f}  макс {np.max(v):.2f} шп.")
 for k, v in err.items():
     v = np.array(v)
     print(f"{k:10s} ср {v.mean():5.1f}°  p95 {np.percentile(v, 95):5.1f}°  макс {v.max():5.1f}°")

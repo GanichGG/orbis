@@ -24,6 +24,8 @@ ROOT_MOTION = True
 LOOK_DIST = 3.0
 LIMB_RULE = True          # правило аниматора: рука R6 = предплечье (локоть→кисть), нога R6 = голень (колено→стопа);
                           # работает, если в файле есть локти/колени (Orbis v2), иначе — LEG_MODE ниже
+DETACH = 1.0              # 1 — блок руки/ноги R6 сдвигается так, что его конец ровно в кисти/стопе стикмена
+                          # (через кости *_Positioner); 0 — блоки прибиты к плечу/тазу, как раньше
 LEG_MODE = "plant"        # без локтей/колен: "plant" — стопы в реальных точках, колено гнётся (стопы не скользят)
                           # "straight" — R6-нога точно по линии таз→стопа (поза как у стикмена, без сгиба)
 KEYS_ONLY = True          # ключи только на ключевых кадрах из файла
@@ -241,6 +243,34 @@ def apply_character(obj, ch, data, frame_start=1):
         v = to3d((F[f][J[b]][0] - F[f][J[a]][0], F[f][J[b]][1] - F[f][J[a]][1]))
         return v.normalized() if v.length > 1e-6 else Vector((0, 0, -1))
 
+    # концы блоков R6 (стандартная геометрия R6: плечо/бедро — голова кости, низ блока — смещение от неё)
+    POS = {"l_hand": ("LeftArm_Positioner", "Left Arm", None), "r_hand": ("RightArm_Positioner", "Right Arm", None),
+           "l_foot": ("LeftLeg_Positioner", "Left Leg", None), "r_foot": ("RightLeg_Positioner", "Right Leg", None)}
+    IA = bpy.data.objects.get("InternalArmature")
+    pos_ok = DETACH > 0 and rule and IA is not None and all(
+        p in obj.pose.bones and c in IA.pose.bones for p, c, _ in POS.values())
+    POS_PART = {p: c for p, c, _ in POS.values()}
+    END = {"Left Arm": Vector((-0.5, 0, -2.5)), "Right Arm": Vector((0.5, 0, -2.5)),
+           "Left Leg": Vector((0.5, 0, -2.0)), "Right Leg": Vector((-0.5, 0, -2.0))}
+    s_rig = 2.0   # торс стикмена (таз..шея) = торс R6 высотой 2 шпильки
+    if pos_ok:
+        to_rig = obj.matrix_world.inverted() @ IA.matrix_world
+        end_rest = {c: IA.matrix_world.inverted().to_3x3() @ END[c] + IA.data.bones[c].head_local for c in END}
+        for p in POS_PART:
+            obj.pose.bones[p].location = (0, 0, 0)
+
+    def r6_end(part):
+        e = IA.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        pb, bone = e.pose.bones[part], IA.data.bones[part]
+        return to_rig @ (pb.matrix @ bone.matrix_local.inverted() @ end_rest[part])
+
+    def hip_now():
+        """Низ торса R6 (центр торса минус 1 шпилька вдоль его оси) — «таз» в пространстве рига."""
+        e = IA.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        pb, bone = e.pose.bones["Torso"], IA.data.bones["Torso"]
+        down = IA.matrix_world.inverted().to_3x3() @ Vector((0, 0, -1))
+        return to_rig @ (pb.matrix @ bone.matrix_local.inverted() @ (bone.head_local + down))
+
     for f in frames:
         # 1) наклон торса: поворот в плоскости вокруг нормали
         dt = to3d((F[f][J["neck"]][0] - F[f][J["hip"]][0], F[f][J["neck"]][1] - F[f][J["hip"]][1])).normalized()
@@ -307,6 +337,16 @@ def apply_character(obj, ch, data, frame_start=1):
                 aim_fk(obj, FK[key], d, axis)
         if mode["head"] == "fk":
             aim_fk(obj, FK["head"], uh, axis)
+        if pos_ok:
+            # 4) конец блока R6 — в кисть/стопу стикмена (в масштабе рига); боковой отступ блока сохраняем
+            want = {}
+            for key, (pos, part, _) in POS.items():
+                v = (F[f][J[key]][0] - F[f][J["hip"]][0], F[f][J[key]][1] - F[f][J["hip"]][1])
+                tgt = hip_now() + to3d(v, s_rig / T_px[f])
+                cur = r6_end(part)
+                tgt.x = cur.x
+                want[pos] = cur + (tgt - cur) * DETACH
+            solve_locations(obj, want, lambda e, nm: r6_end(POS_PART[nm]))
         fr = frame_start + f
         pbs["master"].keyframe_insert("location", frame=fr)
         torso_pb.keyframe_insert(rot_path(torso_pb), frame=fr)
@@ -321,6 +361,9 @@ def apply_character(obj, ch, data, frame_start=1):
         else:
             hb = obj.pose.bones[FK["head"]]
             hb.keyframe_insert(rot_path(hb), frame=fr)
+        if pos_ok:
+            for p in POS_PART:
+                obj.pose.bones[p].keyframe_insert("location", frame=fr)
     return frames
 
 
@@ -334,7 +377,8 @@ def set_interp(obj, f0, f1):
         fcs = anim_utils.action_get_channelbag_for_slot(ad.action, ad.action_slot).fcurves
     except (ImportError, AttributeError):
         fcs = ad.action.fcurves
-    keyed = {FK[k] for k in FK} | {CTRL[k] for k in CTRL} | {"LowerTorso-FK"}
+    keyed = {FK[k] for k in FK} | {CTRL[k] for k in CTRL} | {"LowerTorso-FK"} | {
+        "LeftArm_Positioner", "RightArm_Positioner", "LeftLeg_Positioner", "RightLeg_Positioner"}
     for fc in fcs:
         m = fc.data_path.split('"')
         if len(m) > 1 and m[1] in keyed:

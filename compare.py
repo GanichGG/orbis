@@ -55,8 +55,9 @@ def box(img, origin, ang, length, width, color, alpha):
     cv2.polylines(img, [np.round(pts).astype(np.int32)], True, (20, 20, 20), 1, cv2.LINE_AA)
 
 
-def draw_r6(img, a, hip, T, facing, color):
-    """R6 сбоку: шпилька = T/2 (торс R6 высотой 2 = таз..шея)."""
+def draw_r6(img, a, hip, T, facing, color, ends=None):
+    """R6 сбоку: шпилька = T/2 (торс R6 высотой 2 = таз..шея).
+    ends — концы рук/ног (кисти/стопы): блок кладётся так, чтобы его конец был там (как DETACH в импорте)."""
     s = T / 2.0
     up = a["torso"]                               # угол таз->шея (π — вверх)
     d = np.array([np.sin(up), np.cos(up)])
@@ -65,12 +66,18 @@ def draw_r6(img, a, hip, T, facing, color):
     near = "r" if facing == "r" else "l"          # ближняя к камере сторона рисуется поверх
     far = "l" if near == "r" else "r"
     dark = tuple(int(c * 0.55) for c in color)
-    box(img, shoulder, a[f"{far}_arm"], 2 * s, s, dark, 0.75)
-    box(img, hip, a[f"{far}_leg"], 2 * s, s, dark, 0.75)
+
+    def org(part, default):
+        if ends is None:
+            return default
+        ang = a[part]
+        return np.asarray(ends[part], float) - np.array([np.sin(ang), np.cos(ang)]) * 2 * s
+    box(img, org(f"{far}_arm", shoulder), a[f"{far}_arm"], 2 * s, s, dark, 0.75)
+    box(img, org(f"{far}_leg", hip), a[f"{far}_leg"], 2 * s, s, dark, 0.75)
     box(img, hip, up, 2 * s, s, color, 0.6)
     box(img, neck, a["head"], 1.2 * s, 1.0 * s, color, 0.6)
-    box(img, hip, a[f"{near}_leg"], 2 * s, s, color, 0.8)
-    box(img, shoulder, a[f"{near}_arm"], 2 * s, s, color, 0.8)
+    box(img, org(f"{near}_leg", hip), a[f"{near}_leg"], 2 * s, s, color, 0.8)
+    box(img, org(f"{near}_arm", shoulder), a[f"{near}_arm"], 2 * s, s, color, 0.8)
 
 
 def main():
@@ -79,6 +86,7 @@ def main():
     ap.add_argument("json", nargs="?")
     ap.add_argument("--start", type=int, default=None, help="с какого кадра видео шла разметка (если не записано в файле)")
     ap.add_argument("--all", action="store_true", help="все кадры, без прореживания ключей")
+    ap.add_argument("--attached", action="store_true", help="руки/ноги прибиты к плечу/тазу (как импорт с DETACH = 0)")
     a = ap.parse_args()
     base = os.path.splitext(a.video)[0]
     data = json.load(open(a.json or base + ".r6.json", encoding="utf-8"))
@@ -118,7 +126,10 @@ def main():
                 cv2.line(left, tuple(np.round(p[J[u]]).astype(int)), tuple(np.round(p[J[v]]).astype(int)), col, 2, cv2.LINE_AA)
             for q in p:
                 cv2.circle(left, tuple(np.round(q).astype(int)), 4, col, -1, cv2.LINE_AA)
-            draw_r6(right, {k: v[f] for k, v in c["A"].items()}, c["hip"][f], c["T"][f], c["facing"], col)
+            p = c["P"][f]
+            ends = None if a.attached else {"l_arm": p[J["l_hand"]], "r_arm": p[J["r_hand"]],
+                                             "l_leg": p[J["l_foot"]], "r_leg": p[J["r_foot"]]}
+            draw_r6(right, {k: v[f] for k, v in c["A"].items()}, c["hip"][f], c["T"][f], c["facing"], col, ends)
         key = any(f in c["keys"] for c in chars)
         cv2.putText(left, f"{f + start}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(left, f"{f + start}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
