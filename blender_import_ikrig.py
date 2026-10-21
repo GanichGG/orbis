@@ -279,6 +279,25 @@ def apply_character(obj, ch, data, frame_start=1):
     return frames
 
 
+def set_interp(obj, f0, f1):
+    """Интерполяция INTERP у поставленных ключей костей (keyframe_insert из Python её не задаёт)."""
+    ad = obj.animation_data
+    if not (ad and ad.action):
+        return
+    try:
+        from bpy_extras import anim_utils
+        fcs = anim_utils.action_get_channelbag_for_slot(ad.action, ad.action_slot).fcurves
+    except (ImportError, AttributeError):
+        fcs = ad.action.fcurves
+    keyed = {FK[k] for k in FK} | {CTRL[k] for k in CTRL} | {"LowerTorso-FK"}
+    for fc in fcs:
+        m = fc.data_path.split('"')
+        if len(m) > 1 and m[1] in keyed:
+            for k in fc.keyframe_points:
+                if f0 <= k.co.x <= f1:
+                    k.interpolation = INTERP
+
+
 def run(path):
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
@@ -300,15 +319,10 @@ def run(path):
     if CHARACTER:
         chars = [chars[CHARACTER - 1]]
     done = []
-    prefs = bpy.context.preferences.edit
-    old_interp = prefs.keyframe_new_interpolation_type
-    prefs.keyframe_new_interpolation_type = INTERP
-    try:
-        for rig, ch in zip(rigs, chars):
-            apply_character(rig, ch, data)
-            done.append(f"{ch['name']} -> {rig.name}")
-    finally:
-        prefs.keyframe_new_interpolation_type = old_interp
+    for rig, ch in zip(rigs, chars):
+        frames = apply_character(rig, ch, data)
+        set_interp(rig, frames[0] + 1, frames[-1] + 1)
+        done.append(f"{ch['name']} -> {rig.name}")
     scn.frame_start = 1
     scn.frame_end = max(len(c["frames"]) for c in chars)
     scn.frame_set(1)
