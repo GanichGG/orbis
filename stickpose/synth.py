@@ -100,14 +100,31 @@ def forward(p, hip, T):
 def render(canvas, pts, segs, T, style, val=255, ss=SS):
     """Рисует стикмена в canvas (uint8, суперсэмплинг ss). Возвращает центр головы."""
     SS = ss
-    w = max(1, int(round(T * style["thick"] * SS)))
+    P = lambda v: tuple(np.round(np.asarray(v) * SS).astype(int))
+    w0 = T * style["thick"] * SS
+    w = max(1, int(round(w0)))
     for a, b in segs:
-        pa = tuple(np.round(pts[a] * SS).astype(int))
-        pb = tuple(np.round(pts[b] * SS).astype(int))
-        cv2.line(canvas, pa, pb, val, w, cv2.LINE_8)
+        # стили Stick Nodes: торс бывает толще, нижние звенья рук/ног — тоньше (сужение)
+        k = style.get("torso_w", 1.0) if b in ("mid", "neck") else (style.get("taper", 1.0) if a != "neck" and a != "hip" else 1.0)
+        wi = max(1, int(round(w0 * k)))
+        pa, pb = P(pts[a]), P(pts[b])
+        cv2.line(canvas, pa, pb, val, wi, cv2.LINE_8)
         if style["round"]:
-            cv2.circle(canvas, pa, w // 2, val, -1)
-            cv2.circle(canvas, pb, w // 2, val, -1)
+            cv2.circle(canvas, pa, wi // 2, val, -1)
+            cv2.circle(canvas, pb, wi // 2, val, -1)
+    for side in ("l", "r"):  # кулаки/ботинки — кружки на концах
+        if style.get("fist") and side + "_arm_h" in pts:
+            cv2.circle(canvas, P(pts[side + "_arm_h"]), max(1, int(w0 * style["fist"])), val, -1)
+        if style.get("boot") and side + "_leg_f" in pts:
+            cv2.circle(canvas, P(pts[side + "_leg_f"]), max(1, int(w0 * style["boot"])), val, -1)
+    pr = style.get("prop")
+    if pr and pr["hand"] + "_arm_h" in pts:  # оружие/палка в руке — того же цвета, попадает в маску персонажа
+        h, e = pts[pr["hand"] + "_arm_h"], pts[pr["hand"] + "_arm_e"]
+        d = h - e
+        n = np.linalg.norm(d)
+        d = _rot(d / n if n > 1e-6 else np.array([0.0, 1.0]), pr["ang"])
+        cv2.line(canvas, P(h - d * T * pr["len"] * pr["back"]), P(h + d * T * pr["len"]), val,
+                 max(1, int(w0 * pr["thick"])), cv2.LINE_8)
     hr = T * style["head"]
     hc = pts["neck"] + _dir(pts["head_dir"]) * (hr * style["head_gap"])
     c = tuple(np.round(hc * SS).astype(int))
@@ -118,6 +135,14 @@ def render(canvas, pts, segs, T, style, val=255, ss=SS):
         cv2.circle(canvas, c, r, val, -1)
     if style["neck_line"]:
         cv2.line(canvas, tuple(np.round(pts["neck"] * SS).astype(int)), c, val, w)
+    hair = style.get("hair")
+    if hair:  # причёска-«шипы» на голове (сторона от шеи)
+        base = pts["head_dir"]
+        for i in range(hair["n"]):
+            a = base + hair["spread"] * (i / max(1, hair["n"] - 1) - 0.5) + hair["tilt"]
+            tip = hc + _dir(a) * hr * (1 + hair["size"])
+            l, r_ = hc + _dir(a - 0.35) * hr * 0.9, hc + _dir(a + 0.35) * hr * 0.9
+            cv2.fillConvexPoly(canvas, np.round(np.array([l, tip, r_]) * SS).astype(np.int32), val)
     return hc
 
 
@@ -129,6 +154,14 @@ def sample_style(rng):
         "round": rng.random() < 0.85,
         "ring": rng.random() < 0.08,
         "neck_line": rng.random() < 0.3,
+        "taper": rng.uniform(0.5, 0.95) if rng.random() < 0.35 else 1.0,
+        "torso_w": rng.uniform(1.2, 2.0) if rng.random() < 0.25 else 1.0,
+        "fist": rng.uniform(0.6, 1.1) if rng.random() < 0.25 else 0.0,
+        "boot": rng.uniform(0.6, 1.1) if rng.random() < 0.2 else 0.0,
+        "prop": {"hand": "l" if rng.random() < 0.5 else "r", "len": rng.uniform(0.5, 1.6), "ang": rng.normal(0, 0.5),
+                 "back": rng.uniform(0, 0.4), "thick": rng.uniform(0.3, 0.8)} if rng.random() < 0.15 else None,
+        "hair": {"n": int(rng.integers(2, 6)), "size": rng.uniform(0.3, 0.9), "spread": rng.uniform(0.8, 2.0),
+                 "tilt": rng.normal(0, 0.6)} if rng.random() < 0.2 else None,
     }
 
 
