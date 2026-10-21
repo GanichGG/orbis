@@ -1,0 +1,9 @@
+*.mp4
+*.mov
+*.s2r.json
+*.r6.json
+*.r6.json.tmp
+__pycache__/
+weights/real/
+weights/stage*.pt
+*.blend1
