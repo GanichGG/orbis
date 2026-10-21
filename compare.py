@@ -2,7 +2,8 @@
 
 Запуск:   python compare.py видео.mp4 [видео.r6.json] [--start N] [--all]
 Результат: <видео>_compare.mp4 — слева видео с найденными точками, справа то же видео с наложенным R6
-(вид сбоку, как его поставит импорт: торс по линии таз→шея, руки шея→кисть, ноги таз→стопа).
+(вид сбоку, как его поставит импорт: торс по линии таз→шея, рука по предплечью локоть→кисть,
+нога по голени колено→стопа; у старых файлов без локтей/колен — шея→кисть и таз→стопа).
 Между ключевыми кадрами углы и корень интерполируются линейно, как в Blender (INTERP = "LINEAR"),
 так что видно и потери от прореживания ключей. --all — показать все кадры без прореживания.
 """
@@ -13,11 +14,13 @@ import os
 import cv2
 import numpy as np
 
-J = {"head": 0, "neck": 1, "hip": 2, "l_hand": 3, "r_hand": 4, "l_foot": 5, "r_foot": 6}
-BONES = [("hip", "neck"), ("neck", "head"), ("neck", "l_hand"), ("neck", "r_hand"), ("hip", "l_foot"), ("hip", "r_foot")]
+J = {"head": 0, "neck": 1, "hip": 2, "l_hand": 3, "r_hand": 4, "l_foot": 5, "r_foot": 6,
+     "l_elbow": 7, "r_elbow": 8, "l_knee": 9, "r_knee": 10}
+BONES = [("hip", "neck"), ("neck", "head"), ("neck", "l_elbow"), ("l_elbow", "l_hand"), ("neck", "r_elbow"),
+         ("r_elbow", "r_hand"), ("hip", "l_knee"), ("l_knee", "l_foot"), ("hip", "r_knee"), ("r_knee", "r_foot")]
 # R6 в шпильках (studs): торс 2 в высоту, руки/ноги 2, голова ~1.2; вид сбоку — ширина = толщина 1
-PARTS = {"torso": ("hip", "neck"), "head": ("neck", "head"), "l_arm": ("neck", "l_hand"), "r_arm": ("neck", "r_hand"),
-         "l_leg": ("hip", "l_foot"), "r_leg": ("hip", "r_foot")}
+PARTS = {"torso": ("hip", "neck"), "head": ("neck", "head"), "l_arm": ("l_elbow", "l_hand"), "r_arm": ("r_elbow", "r_hand"),
+         "l_leg": ("l_knee", "l_foot"), "r_leg": ("r_knee", "r_foot")}
 COLORS = [(60, 60, 230), (230, 120, 40), (40, 180, 60), (200, 60, 200)]
 
 
@@ -85,6 +88,10 @@ def main():
     for ch in data["characters"]:
         P = np.array(ch["frames"], float)
         n = len(P)
+        if P.shape[1] < len(J):  # старый файл: локти/колени — середины рук/ног (направления как раньше)
+            mids = [(P[:, J["neck"]] + P[:, J[e]]) / 2 for e in ("l_hand", "r_hand")]
+            mids += [(P[:, J["hip"]] + P[:, J[e]]) / 2 for e in ("l_foot", "r_foot")]
+            P = np.concatenate([P[:, :7], np.stack(mids, 1)], 1)
         T = np.array(ch.get("torso_px") or np.linalg.norm(P[:, J["neck"]] - P[:, J["hip"]], axis=1), float)
         A = angles(P)
         keys = sorted(set().union(*[set(v) for v in ch["keys"].values()])) if ch.get("keys") and not a.all else range(n)

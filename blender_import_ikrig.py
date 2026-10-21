@@ -22,7 +22,9 @@ JSON_PATH = ""
 CHARACTER = None          # номер персонажа (1, 2...) для одиночного импорта; None — по порядку на выделенные риги
 ROOT_MOTION = True
 LOOK_DIST = 3.0
-LEG_MODE = "plant"        # "plant" — стопы ставятся в реальные точки, колено гнётся (R6-нога по голени, стопы не скользят)
+LIMB_RULE = True          # правило аниматора: рука R6 = предплечье (локоть→кисть), нога R6 = голень (колено→стопа);
+                          # работает, если в файле есть локти/колени (Orbis v2), иначе — LEG_MODE ниже
+LEG_MODE = "plant"        # без локтей/колен: "plant" — стопы в реальных точках, колено гнётся (стопы не скользят)
                           # "straight" — R6-нога точно по линии таз→стопа (поза как у стикмена, без сгиба)
 KEYS_ONLY = True          # ключи только на ключевых кадрах из файла
 INTERP = "LINEAR"         # между ключами: "LINEAR" — как выбирались ключи (без замедлений у каждого ключа),
@@ -230,6 +232,15 @@ def apply_character(obj, ch, data, frame_start=1):
             k = 0.999
         return root_pt + d.normalized() * (L * k)
 
+    MID = {"l_hand": ("l_elbow", "l_arm"), "r_hand": ("r_elbow", "r_arm"),
+           "l_foot": ("l_knee", "l_leg"), "r_foot": ("r_knee", "r_leg")}
+    rule = LIMB_RULE and all(MID[k][0] in J for k in MID)
+    print("stick2r6 IK: правило «рука = предплечье, нога = голень»" if rule else "stick2r6 IK: без локтей/колен")
+
+    def dir3(a, b):
+        v = to3d((F[f][J[b]][0] - F[f][J[a]][0], F[f][J[b]][1] - F[f][J[a]][1]))
+        return v.normalized() if v.length > 1e-6 else Vector((0, 0, -1))
+
     for f in frames:
         # 1) наклон торса: поворот в плоскости вокруг нормали
         dt = to3d((F[f][J["neck"]][0] - F[f][J["hip"]][0], F[f][J["neck"]][1] - F[f][J["hip"]][1])).normalized()
@@ -245,21 +256,55 @@ def apply_character(obj, ch, data, frame_start=1):
         # 3) IK-цели кистей/стоп и точка взгляда
         uh = to3d((F[f][J["head"]][0] - F[f][J["neck"]][0], F[f][J["head"]][1] - F[f][J["neck"]][1]))
         uh = uh.normalized() if uh.length > 1e-6 else dt
-        wanted = {}
+        wanted, lower = {}, {}
         for key, root_pt, a, L, r in (("l_hand", sh["l"], "neck", L_arm, ref["arm"]),
                                       ("r_hand", sh["r"], "neck", L_arm, ref["arm"]),
                                       ("l_foot", hp["l"], "hip", L_leg, ref["leg"]),
                                       ("r_foot", hp["r"], "hip", L_leg, ref["leg"])):
-            if mode[key] == "ik":
+            if mode[key] != "ik":
+                continue
+            if rule:
+                # цель так, чтобы нижнее звено рига легло по предплечью/голени стикмена, верхнее — по плечу/бедру
+                mid, limb = MID[key]
+                la, lb = (B[nm].length for nm in REF[limb])
+                d = dir3(mid, key)
+                wanted[CTRL[key]] = root_pt + dir3(a, mid) * la + d * lb
+                lower[key] = (REF[limb][1], d, root_pt + d * ((la + lb) * 0.999))
+            else:
                 wanted[CTRL[key]] = limb_target(root_pt, a, key, L, r)
         if mode["head"] == "look":
             wanted[CTRL["look"]] = head_pt + (look_rot @ uh) * LOOK_DIST
         if wanted:
             solve_locations(obj, wanted, lambda e, nm: e.pose.bones[nm].head)
+        if lower:
+            # полюс рига сгибает колено/локоть в свою сторону; если стикмен согнут иначе — звено легло не туда:
+            # тогда конечность почти прямая вдоль предплечья/голени (направление части R6 всё равно верное)
+            # и ещё один шаг: довернуть цель вокруг корня конечности на оставшийся угол
+            roots = {"l_hand": sh["l"], "r_hand": sh["r"], "l_foot": hp["l"], "r_foot": hp["r"]}
+            for stage in ("straight", "turn"):
+                e = ev(obj)
+                redo = {}
+                for key, (nm, d, straight) in lower.items():
+                    pb = e.pose.bones[nm]
+                    s_dir = (pb.tail - pb.head).normalized()
+                    ang = s_dir.angle(d, 0.0)
+                    if stage == "straight" and ang > math.radians(5):
+                        redo[CTRL[key]] = straight
+                    elif stage == "turn" and ang > math.radians(0.5):
+                        t = wanted[CTRL[key]]
+                        redo[CTRL[key]] = roots[key] + s_dir.rotation_difference(d) @ (t - roots[key])
+                if not redo:
+                    continue
+                wanted.update(redo)
+                solve_locations(obj, wanted, lambda e, nm: e.pose.bones[nm].head)
         for key in ("l_hand", "r_hand"):
             if mode[key] == "fk":
-                v = (F[f][J[key]][0] - F[f][J["neck"]][0], F[f][J[key]][1] - F[f][J["neck"]][1])
-                aim_fk(obj, FK[key], to3d(v).normalized() if math.hypot(*v) > 1e-6 else Vector((0, 0, -1)), axis)
+                if rule:
+                    d = dir3(MID[key][0], key)
+                else:
+                    v = (F[f][J[key]][0] - F[f][J["neck"]][0], F[f][J[key]][1] - F[f][J["neck"]][1])
+                    d = to3d(v).normalized() if math.hypot(*v) > 1e-6 else Vector((0, 0, -1))
+                aim_fk(obj, FK[key], d, axis)
         if mode["head"] == "fk":
             aim_fk(obj, FK["head"], uh, axis)
         fr = frame_start + f

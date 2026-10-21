@@ -4,7 +4,7 @@
 Опции:    --start 0 --end 300     кусок видео (номера кадров)
           --first 6               сколько разных поз спросить в начале у каждого персонажа
           --view side|front       вид в видео: сбоку (по умолчанию) или спереди
-          --facing r,l            куда смотрит каждый персонаж в виде сбоку (r — вправо, l — влево)
+          --facing r,l            куда смотрит каждый персонаж в виде сбоку (r — вправо, l — влево; без него — по коленям)
           --weights путь.pt       веса модели (по умолчанию weights/stickpose.pt рядом со скриптом)
           --quiet 1               не спрашивать кадры в ±N от уже размеченных (меньше вопросов, ниже точность)
           --fresh                 начать заново (иначе продолжит сохранённую разметку)
@@ -107,6 +107,12 @@ def guess_from_model(fc):
     feet = pk["feet"][:2] + pk["feet"][:1]
     g["l_hand"], g["r_hand"] = hands[0][:2], hands[1][:2]
     g["l_foot"], g["r_foot"] = feet[0][:2], feet[1][:2]
+    # локти/колени: ближайший пик сети к середине своей конечности (у модели v1 их нет — середина)
+    for j, root, end, ch in (("l_elbow", "neck", "l_hand", "elbows"), ("r_elbow", "neck", "r_hand", "elbows"),
+                             ("l_knee", "hip", "l_foot", "knees"), ("r_knee", "hip", "r_foot", "knees")):
+        mid = (np.asarray(g[root]) + np.asarray(g[end])) / 2
+        c = [p[:2] for p in pk.get(ch, [])]
+        g[j] = min(c, key=lambda q: np.hypot(q[0] - mid[0], q[1] - mid[1])) if c else mid
     return {k: [float(v[0]), float(v[1])] for k, v in g.items()}
 
 
@@ -294,7 +300,12 @@ def main():
             P, contacts = PP.plant_feet(P, r["T"], r["cuts"])
         if a.keys > 0:
             keys = PP.keyframes(P, r["T"], r["cuts"], r["anchors"], tol_deg=a.keys)
-        ch = {"name": f"Char{c + 1}", "facing": facing[c] if c < len(facing) else "r",
+        fz = PP.facing(P, r["T"])   # куда смотрит (по коленям) в каждом кадре
+        auto = "r" if fz.sum() >= 0 else "l"
+        if c >= len(facing):
+            log(f"Персонаж {c + 1}: смотрит {'вправо' if auto == 'r' else 'влево'} (по коленям; задать вручную — --facing)")
+        ch = {"name": f"Char{c + 1}", "facing": facing[c] if c < len(facing) else auto,
+              "facing_frames": fz.tolist(),
               "joints": JOINTS, "frames": np.round(P, 2).tolist(), "labeled": r["anchors"],
               "cuts": r["cuts"], "torso_px": np.round(r["T"], 2).tolist(),
               "contacts": {JOINTS[j]: v for j, v in contacts.items()}}

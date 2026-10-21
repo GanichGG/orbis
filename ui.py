@@ -4,8 +4,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-JOINTS = ["head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot"]
-BONES = [("neck", "head"), ("neck", "hip"), ("neck", "l_hand"), ("neck", "r_hand"), ("hip", "l_foot"), ("hip", "r_foot")]
+JOINTS = ["head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot", "l_elbow", "r_elbow", "l_knee", "r_knee"]
+KEYS = "1234567890-"   # клавиша -> точка (по порядку JOINTS)
+BONES = [("neck", "head"), ("neck", "hip"), ("neck", "l_elbow"), ("l_elbow", "l_hand"), ("neck", "r_elbow"),
+         ("r_elbow", "r_hand"), ("hip", "l_knee"), ("l_knee", "l_foot"), ("hip", "r_knee"), ("r_knee", "r_foot")]
 
 WIN = "stick2r6"
 DISP_W, DISP_H = 1280, 720
@@ -13,9 +15,11 @@ PANEL = 92
 
 JCOL = {"head": (255, 255, 255), "neck": (200, 200, 200), "hip": (200, 200, 200),
         "l_hand": (255, 170, 40), "l_foot": (255, 110, 0),      # левая сторона — синие оттенки (BGR)
-        "r_hand": (40, 170, 255), "r_foot": (0, 90, 255)}       # правая — оранжевые
+        "r_hand": (40, 170, 255), "r_foot": (0, 90, 255),       # правая — оранжевые
+        "l_elbow": (255, 210, 120), "l_knee": (255, 160, 60), "r_elbow": (120, 210, 255), "r_knee": (60, 150, 255)}
 JNAME = {"head": "Голова", "neck": "Шея (плечи)", "hip": "Таз", "l_hand": "Левая кисть",
-         "r_hand": "Правая кисть", "l_foot": "Левая стопа", "r_foot": "Правая стопа"}
+         "r_hand": "Правая кисть", "l_foot": "Левая стопа", "r_foot": "Правая стопа",
+         "l_elbow": "Левый локоть", "r_elbow": "Правый локоть", "l_knee": "Левое колено", "r_knee": "Правое колено"}
 CHAR_COL = [(80, 220, 80), (230, 80, 230), (80, 220, 230), (230, 200, 60), (60, 120, 255), (200, 200, 200)]
 
 _FONT = {}
@@ -284,7 +288,7 @@ def label_frame(frame, cand, est, title, reason, char_idx, progress=""):
             if cur >= 0:
                 lines.append((f"Кликните: {JNAME[JOINTS[cur]]}.   Tab — следующая точка, Backspace — «не видно», Z — отмена", (120, 255, 160)))
             else:
-                lines.append(("Перетащите неверные точки.  Enter — верно.  1-7 — переставить точку кликом.  Q — поменять руки, W — ноги,  S — пропустить кадр,  Esc — хватит вопросов", (120, 255, 160)))
+                lines.append(("Перетащите неверные точки.  Enter — верно.  1-0,- — переставить точку кликом.  Q — поменять руки, W — ноги,  S — пропустить кадр,  Esc — хватит вопросов", (120, 255, 160)))
             img = view.compose(img_src, lines)
             _draw_skel(img, view, P, (255, 255, 255))
             # легенда
@@ -296,7 +300,7 @@ def label_frame(frame, cand, est, title, reason, char_idx, progress=""):
                 mark = "▶ " if i == cur else ""
                 if P[j] is None:
                     mark += "(нет) "
-                leg = put_lines(leg, [(f"{i + 1} {mark}{JNAME[j]}", (230, 230, 230))], x=x0 + 12, y=y - 2, sz=14)
+                leg = put_lines(leg, [(f"{KEYS[i]} {mark}{JNAME[j]}", (230, 230, 230))], x=x0 + 12, y=y - 2, sz=14)
             cv2.imshow(WIN, leg)
             st["dirty"] = False
         k = _key(_wait(15))
@@ -317,14 +321,16 @@ def label_frame(frame, cand, est, title, reason, char_idx, progress=""):
             hist.append(dict(P))
             P[JOINTS[cur]] = None
             cur = cur + 1 if cur + 1 < len(JOINTS) else -1
-        elif k in list("1234567"):
-            cur = int(k) - 1
-        elif k == "q":
+        elif k in list(KEYS):
+            cur = KEYS.index(k)
+        elif k == "q":  # рука целиком: кисть и локоть
             hist.append(dict(P))
             P["l_hand"], P["r_hand"] = P["r_hand"], P["l_hand"]
-        elif k == "w":
+            P["l_elbow"], P["r_elbow"] = P["r_elbow"], P["l_elbow"]
+        elif k == "w":  # нога целиком: стопа и колено
             hist.append(dict(P))
             P["l_foot"], P["r_foot"] = P["r_foot"], P["l_foot"]
+            P["l_knee"], P["r_knee"] = P["r_knee"], P["l_knee"]
         elif k in ("enter", "space"):
             if P["neck"] is None or P["hip"] is None:
                 cur = JOINTS.index("neck") if P["neck"] is None else JOINTS.index("hip")
