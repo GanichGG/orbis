@@ -6,7 +6,8 @@
           --view side|front       вид в видео: сбоку (по умолчанию) или спереди
           --facing r,l            куда смотрит каждый персонаж в виде сбоку (r — вправо, l — влево; без него — по коленям)
           --weights путь.pt       веса модели (по умолчанию weights/stickpose.pt рядом со скриптом)
-          --quiet 1               не спрашивать кадры в ±N от уже размеченных (меньше вопросов, ниже точность)
+          --quiet 2               не спрашивать кадры в ±N от уже размеченных (0 — спрашивать всё подряд)
+          --ask 40                не больше N вопросов про спорные кадры на персонажа (по умолчанию кадров/12)
           --fresh                 начать заново (иначе продолжит сохранённую разметку)
 Результат: <видео>.r6.json — его открывает blender_import_r6.py.
 Ваши разметки также сохраняются в weights/real/*.npz — на них можно дообучать модель (train.py --real).
@@ -129,7 +130,8 @@ def main():
     ap.add_argument("--no_plant", action="store_true", help="не фиксировать стопы на земле")
     ap.add_argument("--weights", default=os.path.join(HERE, "weights", "stickpose.pt"))
     ap.add_argument("--finetune_every", type=int, default=0, help="дообучать сеть после каждых N ответов (0 — авто: 4 на видеокарте, 10 на процессоре)")
-    ap.add_argument("--quiet", type=int, default=0)
+    ap.add_argument("--quiet", type=int, default=2)
+    ap.add_argument("--ask", type=int, default=0, help="вопросов про спорные кадры на персонажа (0 — кадров/12, не меньше 10)")
     ap.add_argument("--fresh", action="store_true")
     a = ap.parse_args()
 
@@ -245,17 +247,19 @@ def main():
     refresh(0, retrain=True)
     since_ft = [0] * nc
 
-    # ---- ШАГ 2б: спорные кадры ----
+    # ---- ШАГ 2б: спорные кадры (самые важные первыми, не больше бюджета на персонажа) ----
+    budget = a.ask or max(10, n // 12)
+    asked_c = [0] * nc
     asked = 0
     while True:
-        w = T.worst_frame(results)
-        left = T.count_flagged(results)
+        w = T.worst_frame([r if asked_c[k] < budget else None for k, r in enumerate(results)])
         if w is None:
-            log(f"Спорных кадров не осталось (вопросов: {asked}).")
+            log(f"Вопросы закончились (задано: {asked}; бюджет {budget} на персонажа, больше — --ask).")
             break
         _, c, f = w
         reason = "; ".join(dict.fromkeys(results[c]["why"][f])) or "низкая уверенность"
-        st = ask(c, f, reason, f"[спорных ~{left}]")
+        st = ask(c, f, reason, f"[вопрос {asked_c[c] + 1}/{budget}]")
+        asked_c[c] += 1
         if st == "close":
             return
         if st == "stop":
