@@ -4,7 +4,7 @@
   0 — силуэт персонажа (с дырками там, где его перекрывают),
   1 — силуэты других персонажей/мусора поблизости,
   2, 3 — силуэт персонажа в предыдущем и следующем кадре (в той же рамке: видно движение),
-и разметка: голова, шея (плечи), таз, 2 кисти, 2 стопы (лево/право не различаем)
+и разметка: голова, шея (плечи), таз, 2 кисти, 2 стопы, 2 локтя, 2 колена (лево/право не различаем)
 + карта «скелет тела» (линии костей текущей позы без шлейфов и мусора) — учит сеть видеть тело целиком.
 
 Расширяется добавлением стилей в Style и поз в sample_pose().
@@ -18,8 +18,9 @@ S = 128          # размер входа
 HM = 64          # размер карт вероятности
 SS = 4           # суперсэмплинг при рисовании (сглаженные края)
 ANG = ("torso", "chest", "head", "l_arm", "r_arm", "l_leg", "r_leg", "l_arm2", "r_arm2", "l_leg2", "r_leg2")
-KP = ["head", "neck", "hip", "hand", "hand", "foot", "foot"]
-CH = ["head", "neck", "hip", "hands", "feet"]
+KP = ["head", "neck", "hip", "hand", "hand", "foot", "foot", "elbow", "elbow", "knee", "knee"]
+CH = ["head", "neck", "hip", "hands", "feet", "elbows", "knees"]   # первые 5 — как у моделей v1
+GROUPS = [[0], [1], [2], [3, 4], [5, 6], [7, 8], [9, 10]]
 CIN = 4          # каналы входа (см. выше); старые модели v1 брали только первые 2
 
 
@@ -138,7 +139,8 @@ def _figure(rng, T, hip):
 
 
 def _keypoints(pts, head):
-    return np.array([head, pts["neck"], pts["hip"], pts["l_arm_h"], pts["r_arm_h"], pts["l_leg_f"], pts["r_leg_f"]], float)
+    return np.array([head, pts["neck"], pts["hip"], pts["l_arm_h"], pts["r_arm_h"], pts["l_leg_f"], pts["r_leg_f"],
+                     pts["l_arm_e"], pts["r_arm_e"], pts["l_leg_k"], pts["r_leg_k"]], float)
 
 
 def _motion(rng, p, hip, T):
@@ -288,12 +290,11 @@ def bone_map(pts, segs, head):
 
 
 def heatmaps(kp, sigma=1.6):
-    """kp (7,2) в пикселях S -> (5,HM,HM)."""
+    """kp (11,2) в пикселях S -> (len(CH),HM,HM)."""
     yy, xx = np.mgrid[0:HM, 0:HM].astype(np.float32)
     k = kp * (HM / S)
-    out = np.zeros((5, HM, HM), np.float32)
-    groups = [[0], [1], [2], [3, 4], [5, 6]]
-    for c, g in enumerate(groups):
+    out = np.zeros((len(GROUPS), HM, HM), np.float32)
+    for c, g in enumerate(GROUPS):
         for i in g:
             out[c] = np.maximum(out[c], np.exp(-((xx - k[i, 0]) ** 2 + (yy - k[i, 1]) ** 2) / (2 * sigma ** 2)))
     return out
@@ -311,7 +312,8 @@ if __name__ == "__main__":
         img[..., 1] = (np.maximum(x[2], x[3]) * 90).astype(np.uint8)
         img[..., 1] = np.maximum(img[..., 1], cv2.resize(bones, (S, S)) * 255).astype(np.uint8)
         for j, (px, py) in enumerate(kp):
-            col = [(255, 255, 255), (0, 255, 0), (0, 255, 255), (255, 255, 0), (255, 255, 0), (255, 0, 255), (255, 0, 255)][j]
+            col = [(255, 255, 255), (0, 255, 0), (0, 255, 255), (255, 255, 0), (255, 255, 0), (255, 0, 255), (255, 0, 255),
+                   (255, 128, 0), (255, 128, 0), (128, 0, 255), (128, 0, 255)][j]
             cv2.circle(img, (int(px), int(py)), 3, col, -1)
         tiles.append(cv2.resize(img, (192, 192), interpolation=cv2.INTER_NEAREST))
     rows = [np.hstack(tiles[r:r + 8]) for r in range(0, 32, 8)]

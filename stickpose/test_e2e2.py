@@ -72,7 +72,7 @@ print(f"\nвопросов: {stats['asked']} (из них оценка уже б
 import track2  # noqa: E402
 
 for ci in range(nc):
-    P = res[ci]["P"]
+    P = res[ci]["P"][:, :7]
     g = GT[:, ci]
     T = np.linalg.norm(g[:, 1] - g[:, 2], axis=1)
     e = np.linalg.norm(P - g, axis=2) / T[:, None]

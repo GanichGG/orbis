@@ -6,11 +6,14 @@
 """
 import numpy as np
 
-JOINTS = ["head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot"]
+JOINTS = ["head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot", "l_elbow", "r_elbow", "l_knee", "r_knee"]
+MIDS = (("l_elbow", "neck", "l_hand", "elbows", 0), ("r_elbow", "neck", "r_hand", "elbows", 0),
+        ("l_knee", "hip", "l_foot", "knees", 1), ("r_knee", "hip", "r_foot", "knees", 1))
 JI = {j: i for i, j in enumerate(JOINTS)}
 PAIRS = [(("l_hand", "r_hand"), "neck", "hands"), (("l_foot", "r_foot"), "hip", "feet")]
 RU = {"head": "голова", "neck": "шея", "hip": "таз", "l_hand": "левая рука", "r_hand": "правая рука",
-      "l_foot": "левая нога", "r_foot": "правая нога"}
+      "l_foot": "левая нога", "r_foot": "правая нога", "l_elbow": "левый локоть", "r_elbow": "правый локоть",
+      "l_knee": "левое колено", "r_knee": "правое колено"}
 
 CFG = dict(
     w_vel=0.15, w_acc=0.5,     # в единицах «длина торса» за кадр
@@ -29,6 +32,8 @@ CFG = dict(
     w_len=3.0,                 # торс: шея-таз и голова-шея держат свою длину (штраф за |длина/норма - 1|)
     w_reach=4.0,               # кисть/стопа дальше длины руки/ноги -> штраф за каждую лишнюю «длину торса»
     reach=(1.3, 1.6),          # длина руки (от шеи) и ноги (от таза) в торсах, если разметки не говорят больше
+    limb_len=(1.15, 1.3),      # плечо+предплечье и бедро+голень в торсах (если по видео не оценить)
+    w_mid=2.0,                 # локоть/колено: штраф за разницу звеньев и за «не ту» длину конечности
 )
 
 
@@ -123,8 +128,8 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
             if np.linalg.norm(cen[f] - cen[f - 1]) / T[f] > cfg["cut_jump"] or abs(np.log(thick[f] / thick[f - 1])) > 0.5:
                 cuts[f] = True
 
-    P = np.zeros((n, 7, 2))
-    C = np.zeros((n, 7))
+    P = np.zeros((n, len(JOINTS), 2))
+    C = np.zeros((n, len(JOINTS)))
     sev = np.zeros(n)
     why = [[] for _ in range(n)]
 
@@ -282,11 +287,51 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
                     # опасно мелькание — его ловит «рывок»; на тесте спрашивать про неё точности не прибавляет
                     flag(f, 0.0 if swap else 1.0 + (cfg["amb_gap"] - gap), f"{RU[j]}: " + ("лево/право?" if swap else "два варианта"))
 
-    # ---- рывки (не на смене плана) ----
+    # ---- локти и колени: середина конечности по кандидатам сети (равные звенья, постоянная длина, плавность).
+    # Нет кандидатов (модель v1) — середина прямой конечности, т.е. направление как «шея->кисть», «таз->стопа».
+    for j, root, end, ch, leg in MIDS:
+        def geo(f, q):
+            a, b = P[f, JI[root]], P[f, JI[end]]
+            u, v = np.linalg.norm(q - a) / T[f], np.linalg.norm(b - q) / T[f]
+            return u, v
+        tot = []
+        for f in range(n):
+            fc = frames_c[f]
+            if fc and fc.get("ok") and fc["peaks"].get(ch):
+                for (x, y, sc) in fc["peaks"][ch][:4]:
+                    if sc > 0.5:
+                        u, v = geo(f, np.array([x, y]))
+                        if abs(u - v) < 0.35 * (u + v):
+                            tot.append(u + v)
+        A = float(np.median(tot)) if len(tot) >= 10 else cfg["limb_len"][leg]
+        X, U = [], []
+        for f in range(n):
+            a, b = P[f, JI[root]], P[f, JI[end]]
+            lp = lab_pt(f, j) if f in labels else None
+            if lp is not None:
+                X.append(lp[None] / T[f])
+                U.append(np.zeros(1))
+                continue
+            xs, us = [(a + b) / 2], [cfg["hold_cost"]]
+            fc = frames_c[f]
+            if fc and fc.get("ok") and fc["peaks"].get(ch):
+                for (x, y, sc) in fc["peaks"][ch][:4]:
+                    q = np.array([x, y])
+                    u, v = geo(f, q)
+                    xs.append(q)
+                    us.append(-cfg["w_score"] * np.log(max(sc, 1e-3)) + cfg["w_mid"] * (abs(u - v) + abs(u + v - A)))
+            X.append(np.array(xs) / T[f])
+            U.append(np.array(us))
+        path, _ = _viterbi2(X, U, cuts, cfg["w_vel"], cfg["w_acc"])
+        for f in range(n):
+            P[f, JI[j]] = X[f][path[f]] * T[f]
+            C[f, JI[j]] = 1.0 if f in labels else (0.3 if path[f] == 0 else 0.8)
+
+    # ---- рывки (не на смене плана; по основным 7 точкам) ----
     for f in range(1, n):
         if cuts[f]:
             continue
-        d = np.linalg.norm(P[f] - P[f - 1], axis=1) / T[f]
+        d = np.linalg.norm(P[f, :7] - P[f - 1, :7], axis=1) / T[f]
         rel = d - d[JI["hip"]]
         k = int(np.argmax(rel))
         if rel[k] > cfg["max_jump"] and (f - 1) not in labels:

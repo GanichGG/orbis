@@ -5,12 +5,25 @@
 """
 import numpy as np
 
-J = {"head": 0, "neck": 1, "hip": 2, "l_hand": 3, "r_hand": 4, "l_foot": 5, "r_foot": 6}
-PARTS = {  # часть R6: (откуда, куда) — направление части
+J = {"head": 0, "neck": 1, "hip": 2, "l_hand": 3, "r_hand": 4, "l_foot": 5, "r_foot": 6,
+     "l_elbow": 7, "r_elbow": 8, "l_knee": 9, "r_knee": 10}
+PARTS = {  # часть R6: (откуда, куда) — направление части. Правило аниматора: рука R6 = предплечье, нога = голень
     "Torso": ("hip", "neck"), "Head": ("neck", "head"),
-    "Left Arm": ("neck", "l_hand"), "Right Arm": ("neck", "r_hand"),
-    "Left Leg": ("hip", "l_foot"), "Right Leg": ("hip", "r_foot"),
+    "Left Arm": ("l_elbow", "l_hand"), "Right Arm": ("r_elbow", "r_hand"),
+    "Left Leg": ("l_knee", "l_foot"), "Right Leg": ("r_knee", "r_foot"),
 }
+
+
+def facing(P, T):
+    """Куда смотрит персонаж по кадрам: +1 вправо, -1 влево, 0 не понять. Колени гнутся вперёд:
+    знак векторного произведения (таз->стопа) x (таз->колено) в системе тела (работает и вверх ногами)."""
+    votes = np.zeros(len(P))
+    for k, f in (("l_knee", "l_foot"), ("r_knee", "r_foot")):
+        d = P[:, J[f]] - P[:, J["hip"]]
+        q = P[:, J[k]] - P[:, J["hip"]]
+        cr = (d[:, 0] * q[:, 1] - d[:, 1] * q[:, 0]) / (np.linalg.norm(d, axis=1) * T + 1e-6)
+        votes += np.where(np.abs(cr) > 0.08, -np.sign(cr), 0)   # cr < 0 -> колено справа от линии -> вправо
+    return np.sign(votes).astype(int)
 
 
 def segments(n, cuts):

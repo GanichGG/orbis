@@ -13,9 +13,10 @@ def synth_eval(model, n=400, seed=12345):
     rng = np.random.default_rng(seed)
     X, K, _ = zip(*[synth.make_sample(rng) for _ in range(n)])
     H = predict(model, np.stack(X))
-    groups = {"head": [0], "neck": [1], "hip": [2], "hands": [3, 4], "feet": [5, 6]}
     res = {}
-    for ch, (name, ids) in enumerate(groups.items()):
+    for ch, (name, ids) in enumerate(zip(synth.CH, synth.GROUPS)):
+        if ch >= H.shape[1]:  # модель v1 — без локтей и колен
+            break
         errs = []
         for i in range(n):
             pk = peaks(H[i, ch], k=len(ids) + 1)

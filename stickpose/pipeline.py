@@ -8,7 +8,7 @@ import colorseg as CS
 import synth
 from model import predict, peaks
 
-CHANNELS = ["head", "neck", "hip", "hands", "feet"]
+CHANNELS = synth.CH   # у моделей v1 только первые 5 (без локтей и колен)
 FEAT = 24
 
 
@@ -24,12 +24,16 @@ def line_thickness(mask):
 
 def silhouette_feat(x):
     import cv2
-    return cv2.resize(x[0], (FEAT, FEAT), interpolation=cv2.INTER_AREA).ravel()
+    a = x[0].astype(np.float32) / (255.0 if x.dtype == np.uint8 else 1.0)
+    return cv2.resize(a, (FEAT, FEAT), interpolation=cv2.INTER_AREA).ravel()
 
 
 def build_inputs(masks_per_frame, n_chars):
-    """masks_per_frame[f][c] -> для каждого персонажа список (x(2,S,S), M, thick) или None."""
-    out = [[None] * len(masks_per_frame) for _ in range(n_chars)]
+    """masks_per_frame[f][c] -> для каждого персонажа список (x(4,S,S) uint8, M, thick) или None.
+    Каналы: свой силуэт, чужие, свой силуэт в кадре f-1 и f+1 — в рамке кадра f (сеть видит движение)."""
+    import cv2
+    n, S = len(masks_per_frame), synth.S
+    out = [[None] * n for _ in range(n_chars)]
     for f, ms in enumerate(masks_per_frame):
         for c in range(n_chars):
             other = np.zeros_like(ms[c])
@@ -39,7 +43,14 @@ def build_inputs(masks_per_frame, n_chars):
             x, M = CS.crop_input(ms[c], other)
             if x is None:
                 continue
-            out[c][f] = (x, M, line_thickness(ms[c]))
+            ch = [np.round(x * 255).astype(np.uint8)]
+            for g in (f - 1, f + 1):
+                if 0 <= g < n and masks_per_frame[g] is not None:
+                    ch.append(cv2.warpAffine(masks_per_frame[g][c].astype(np.uint8) * 255, M, (S, S),
+                                             flags=cv2.INTER_AREA)[None])
+                else:
+                    ch.append(np.zeros((1, S, S), np.uint8))
+            out[c][f] = (np.concatenate(ch), M, line_thickness(ms[c]))
     return out
 
 
@@ -54,8 +65,8 @@ def run_model(model, inputs, bs=64):
         for f, hm in zip(chunk, H):
             x, M, th = inputs[f]
             pk = {}
-            for ch, name in enumerate(CHANNELS):
-                pp = peaks(hm[ch], k=4 if name in ("hands", "feet") else 3)
+            for ch, name in enumerate(CHANNELS[:hm.shape[0]]):
+                pp = peaks(hm[ch], k=4 if name in ("hands", "feet", "elbows", "knees") else 3)
                 pts = CS.crop_to_frame([p[:2] for p in pp], M)
                 pk[name] = [(float(px), float(py), s) for (px, py), (_, _, s) in zip(pts, pp)]
             res[f] = {"ok": True, "peaks": pk, "scale": th, "feat": silhouette_feat(x), "hm": hm}
@@ -63,18 +74,23 @@ def run_model(model, inputs, bs=64):
 
 
 def labels_to_samples(inputs, labels):
-    """Разметки пользователя -> обучающие примеры (x, kp в пикселях кропа). Невидимые точки пропускаются
-    (заменяются предсказанием не нужно: такие кадры берём, только если видны все 7)."""
+    """Разметки пользователя -> обучающие примеры (x, kp (11,2) в пикселях кропа). Берём кадры, где видны все точки;
+    у старых разметок (7 точек) локти/колени — середины рук/ног (грубо, но направления торса/кистей/стоп верны)."""
+    J = ("head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot")
     out = []
     for f, L in labels.items():
         f = int(f)
         if inputs[f] is None:
             continue
-        if any(L.get(j) is None for j in ("head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot")):
+        if any(L.get(j) is None for j in J):
             continue
+        pts = [L[j] for j in J]
+        for j, (a, b) in (("l_elbow", ("neck", "l_hand")), ("r_elbow", ("neck", "r_hand")),
+                          ("l_knee", ("hip", "l_foot")), ("r_knee", ("hip", "r_foot"))):
+            pts.append(L[j] if L.get(j) is not None else (np.add(L[a], L[b]) / 2).tolist())
         x, M, _ = inputs[f]
-        kp = CS.frame_to_crop([L[j] for j in ("head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot")], M)
-        out.append((x.astype(np.float32), kp.astype(np.float32)))
+        kp = CS.frame_to_crop(pts, M)
+        out.append((x, kp.astype(np.float32)))
     return out
 
 
