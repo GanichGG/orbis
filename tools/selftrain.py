@@ -5,9 +5,8 @@
 
 Персонажи берутся из <видео>.s2r.json (если ролик уже открывали в stick2r6.py — там клики и разметки),
 иначе открывается окно пипетки (кликнуть персонажей, Enter). Кадр попадает в обучение, только если:
-  - трекер уверен во всех 11 точках и не считает кадр спорным;
-  - точки плавно продолжают соседние кадры (нет рывка);
-  - сеть ставит те же точки на зеркальном кадре (согласие с самой собой).
+  - точка плавно продолжает соседние кадры (нет рывка) и сеть ставит её же на зеркальном кадре;
+  - уверены голова, шея и таз и хотя бы 4 из 8 точек рук/ног (остальные в этом кадре не учим).
 Цикл: selftrain -> train.py --pseudo weights/pseudo -> selftrain с новыми весами -> ...
 """
 import argparse
@@ -50,26 +49,23 @@ def mirror_peaks(model, inputs):
     return out
 
 
-def select(r, frames_c, inputs, mir, tol_mirror=0.12, tol_smooth=0.15, min_gap=2):
-    """Кадры-кандидаты в обучение (см. правила в начале файла)."""
+def select(r, frames_c, inputs, mir, tol_mirror=0.12, tol_smooth=0.2, min_gap=2):
+    """-> {кадр: маска уверенных точек (11,)}. Точка уверенная, если плавно продолжает соседние кадры и сеть ставит
+    её же на зеркальном кадре (торс — ещё и уверенность трекера). Кадр берём, если уверены голова, шея, таз
+    и хотя бы 4 из 8 точек рук/ног; неуверенные точки в обучении не участвуют."""
     P, C, Tt, n = r["P"], r["C"], r["T"], len(r["P"])
     cuts = set(r["cuts"])
-    keep, last = [], -10
+    keep, last = {}, -10
     for f in range(1, n - 1):
-        if inputs[f] is None or frames_c[f] is None or f in cuts or (f + 1) in cuts:
-            continue
-        if r["sev"][f] > 0.3 or C[f, :7].min() < 0.6 or C[f, 7:].min() < 0.7:
+        if inputs[f] is None or frames_c[f] is None or f in cuts or (f + 1) in cuts or f not in mir:
             continue
         acc = np.linalg.norm(P[f] - (P[f - 1] + P[f + 1]) / 2, axis=1) / Tt[f]
-        if acc.max() > tol_smooth:
-            continue
-        m = mir.get(f)
-        if m is None or any(len(m.get(CH_OF[j], [])) == 0 or
-                            np.min(np.linalg.norm(m[CH_OF[j]] - P[f, i], axis=1)) / Tt[f] > tol_mirror
-                            for i, j in enumerate(T.JOINTS)):
-            continue
-        if f - last >= min_gap:
-            keep.append(f)
+        mr = np.array([np.min(np.linalg.norm(mir[f][CH_OF[j]] - P[f, i], axis=1)) / Tt[f] if len(mir[f].get(CH_OF[j], []))
+                       else 9.0 for i, j in enumerate(T.JOINTS)])
+        good = (acc < tol_smooth) & (mr < tol_mirror)
+        good[:3] &= C[f, :3] >= 0.5
+        if good[:3].all() and good[3:].sum() >= 4 and f - last >= min_gap:
+            keep[f] = good
             last = f
     return keep
 
@@ -131,10 +127,12 @@ def main():
             if r is None:
                 continue
             keep = select(r, fc, inputs[c], mirror_peaks(model, inputs[c]))
-            for f in keep:
+            for f, good in keep.items():
                 x, M, _ = inputs[c][f]
+                kp = CS.frame_to_crop(r["P"][f], M).astype(np.float32)
+                kp[~good] = np.nan   # неуверенные точки — не учим
                 X.append(x)
-                K.append(CS.frame_to_crop(r["P"][f], M).astype(np.float32))
+                K.append(kp)
             print(f"{os.path.basename(path)}: персонаж {c + 1} — уверенных кадров {len(keep)} из {n}")
         if X:
             name = os.path.splitext(os.path.basename(path))[0]

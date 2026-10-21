@@ -430,6 +430,9 @@ def heatmaps(kp, sigma=1.6):
     k = kp * (HM / S)
     out = np.zeros((len(GROUPS), HM, HM), np.float32)
     for c, g in enumerate(GROUPS):
+        if np.isnan(k[g]).any():  # неуверенная точка (самообучение) — этот канал не учим
+            out[c] = -1
+            continue
         for i in g:
             out[c] = np.maximum(out[c], np.exp(-((xx - k[i, 0]) ** 2 + (yy - k[i, 1]) ** 2) / (2 * sigma ** 2)))
     return out

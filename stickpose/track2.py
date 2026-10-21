@@ -277,7 +277,10 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
                 cols = slice(2 * side, 2 * side + 2)
                 far = np.linalg.norm(X[f][:, cols] - X[f][s, cols], axis=1) > cfg["amb_dist"]
                 gap = float(marg[f][far].min() - marg[f][s]) if far.any() else 9.0
-                C[f, JI[j]] = 1.0 / (1.0 + np.exp(-(gap - cfg["amb_gap"]) * 4))
+                # уверенность — без учёта перестановки лево/право (она не меняет, где точки)
+                noswap = far & (np.linalg.norm(X[f] - X[f][s][[2, 3, 0, 1]], axis=1) >= cfg["amb_dist"])
+                gap_ns = float(marg[f][noswap].min() - marg[f][s]) if noswap.any() else 9.0
+                C[f, JI[j]] = 1.0 / (1.0 + np.exp(-(gap_ns - cfg["amb_gap"]) * 4))
                 if gap < cfg["amb_gap"]:
                     k = int(np.nonzero(far)[0][np.argmin(marg[f][far])])
                     swap = np.linalg.norm(X[f][k] - X[f][s][[2, 3, 0, 1]]) < cfg["amb_dist"]

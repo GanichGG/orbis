@@ -61,7 +61,8 @@ def loss_fn(logits, target):
     p = torch.sigmoid(logits)
     nk = len(synth.CH)
     pk, tk = p[:, :nk], target[:, :nk]
-    loss = ((1.0 + 20.0 * tk) * (pk - tk) ** 2).mean()
+    mk = (tk >= 0).float()   # -1 — точка неизвестна (у кадров самообучения), не учим
+    loss = (mk * (1.0 + 20.0 * tk) * (pk - tk) ** 2).sum() / (mk.sum() + 1.0)
     if logits.shape[1] > nk:  # карта костей (там, где она известна: у синтетики)
         pb, tb = p[:, nk], target[:, nk]
         m = (tb >= 0).float()
