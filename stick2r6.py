@@ -275,7 +275,7 @@ def main():
 
     # ---- экспорт ----
     facing = [s.strip() for s in a.facing.split(",") if s.strip()]
-    out = {"format": "stick2r6", "version": 2, "fps": video.fps, "view": a.view,
+    out = {"format": "stick2r6", "version": 2, "fps": video.fps, "view": a.view, "start": a.start,
            "frame_size": [video[0].shape[1], video[0].shape[0]], "characters": []}
     for c in range(nc):
         r = results[c]

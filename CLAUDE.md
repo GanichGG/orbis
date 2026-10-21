@@ -37,6 +37,7 @@
   смены плана (разрыв), нормировка по длине торса, память поз (похожий силуэт), флаги спорных кадров.
 - `stickpose/postprocess.py` — фиксация стоп на земле + выбор ключевых кадров (RDP по углам частей, допуск 4°).
 - `blender_import_ikrig.py` — **импорт на риг пользователя** (см. ниже). `blender_import_r6.py` — на простой R6-скелет.
+- `compare.py` — видео «оригинал с точками | R6 сверху» (`<видео>_compare.mp4`), ключи интерполируются как в Blender.
 - `stickpose/evaluate.py`, `overlay.py`, `make_testvideo.py`, `test_e2e2.py`, `tools/test_ik.py` — проверки.
 - Старые модули v1 (`vision.py`, `tracker.py`, `segment.py`) удалены; их не возвращать.
 
