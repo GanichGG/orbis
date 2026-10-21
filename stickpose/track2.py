@@ -192,7 +192,7 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
             gap = float(marg[f][far].min() - marg[f][s]) if far.any() else 9.0
             sc = np.exp(-U[f][s] / cfg["w_score"]) if s > 0 else 0.0
             C[f, JI[j]] = min(1.0, sc)
-            if s == 0:
+            if s == 0 and frames_c[f] and frames_c[f].get("ok"):  # без маски спрашивать нечего (персонажа нет в кадре)
                 flag(f, 1.2, f"{RU[j]}: не найдена")
             elif gap < cfg["amb_gap"]:
                 flag(f, 1.0 + (cfg["amb_gap"] - gap), f"{RU[j]}: два варианта")
@@ -278,7 +278,9 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
                     swap = np.linalg.norm(X[f][k] - X[f][s][[2, 3, 0, 1]]) < cfg["amb_dist"]
                     # перестановка лево/право сама по себе не страшна (вид сбоку, руки перекрываются);
                     # опасно только мелькание — его ловит проверка «рывок» ниже
-                    flag(f, 1.0 + (cfg["amb_gap"] - gap), f"{RU[j]}: " + ("лево/право?" if swap else "два варианта"))
+                    # перестановка лево/право сама по себе не страшна (вид сбоку, руки/ноги перекрываются),
+                    # опасно мелькание — его ловит «рывок»; на тесте спрашивать про неё точности не прибавляет
+                    flag(f, 0.0 if swap else 1.0 + (cfg["amb_gap"] - gap), f"{RU[j]}: " + ("лево/право?" if swap else "два варианта"))
 
     # ---- рывки (не на смене плана) ----
     for f in range(1, n):
