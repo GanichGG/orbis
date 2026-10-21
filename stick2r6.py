@@ -5,7 +5,7 @@
           --first 6               сколько разных поз спросить в начале у каждого персонажа
           --view side|front       вид в видео: сбоку (по умолчанию) или спереди
           --facing r,l            куда смотрит каждый персонаж в виде сбоку (r — вправо, l — влево; без него — по коленям)
-          --weights путь.pt       веса модели (по умолчанию weights/orbis.pt, если есть, иначе weights/stickpose.pt)
+          --weights путь.pt       веса модели (по умолчанию weights/prismium.pt, иначе orbis.pt, иначе stickpose.pt)
           --quiet 2               не спрашивать кадры в ±N от уже размеченных (0 — спрашивать всё подряд)
           --ask 40                не больше N вопросов про спорные кадры на персонажа (по умолчанию кадров/12)
           --fresh                 начать заново (иначе продолжит сохранённую разметку)
@@ -29,7 +29,7 @@ import colorseg as CS          # noqa: E402
 import pipeline as PL          # noqa: E402
 import track2 as T             # noqa: E402
 import postprocess as PP       # noqa: E402
-from model import load, device  # noqa: E402
+from model import load, device, default_weights  # noqa: E402
 
 JOINTS = T.JOINTS
 MAX_SIDE = 960
@@ -128,8 +128,7 @@ def main():
     ap.add_argument("--smooth", type=int, default=5)
     ap.add_argument("--keys", type=float, default=4.0, help="допуск ключевых кадров в градусах (0 — ключ на каждом кадре)")
     ap.add_argument("--no_plant", action="store_true", help="не фиксировать стопы на земле")
-    w_def = os.path.join(HERE, "weights", "orbis.pt")
-    ap.add_argument("--weights", default=w_def if os.path.exists(w_def) else os.path.join(HERE, "weights", "stickpose.pt"))
+    ap.add_argument("--weights", default=default_weights(HERE))
     ap.add_argument("--finetune_every", type=int, default=0, help="дообучать сеть после каждых N ответов (0 — авто: 4 на видеокарте, 10 на процессоре)")
     ap.add_argument("--quiet", type=int, default=2)
     ap.add_argument("--ask", type=int, default=0, help="вопросов про спорные кадры на персонажа (0 — кадров/12, не меньше 10)")

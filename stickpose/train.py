@@ -1,8 +1,8 @@
-"""Обучение StickPose (Orbis) на синтетике (и, при наличии, на размеченных кадрах реальных видео).
+"""Обучение StickPose (Prismium) на синтетике (и, при наличии, на размеченных кадрах реальных видео).
 
-    python train.py --steps 20000 --out orbis.pt                 # с нуля
-    python train.py --resume старые.pt --steps 10000 --out orbis.pt   # дообучить (веса v1 сами станут v2)
-    python train.py --resume orbis.pt --out orbis.pt             # если обучение оборвалось — продолжит с того же шага
+    python train.py --steps 20000 --out prismium.pt              # с нуля
+    python train.py --resume старые.pt --steps 10000 --out prismium.pt   # дообучить (веса v1 сами станут v2)
+    python train.py --resume prismium.pt --out prismium.pt       # если обучение оборвалось — продолжит с того же шага
     python train.py --real labels_dir --steps 5000               # добавить реальные разметки (*.npz)
 
 Сам использует видеокарту, если есть (CUDA). Каждые 200 шагов сохраняет веса и состояние обучения в --out.
@@ -146,7 +146,7 @@ def main():
     if a.resume:
         model = load(a.resume, dev).train()
         if model.cfg["cin"] != synth.CIN or model.cfg["cout"] != len(synth.CH) + 1:
-            print("веса v1 -> Orbis v2 (соседние кадры + карта костей), знания старой модели сохраняются")
+            print("веса v1 -> Prismium v2 (соседние кадры + карта костей), знания старой модели сохраняются")
             model = upgrade(model).train()
         ex = torch.load(a.resume, map_location="cpu", weights_only=False).get("extra", {})
         if "opt" in ex and ex["steps"] < ex["total"]:

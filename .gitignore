@@ -16,3 +16,6 @@ Orbis.exe
 build/
 weights/orbis*.pt
 weights/test*.pt
+prismium.json
+Prismium.exe
+weights/prismium*.pt

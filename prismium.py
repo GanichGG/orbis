@@ -1,10 +1,10 @@
-"""Orbis — оконный инструмент: ролики слева, действия справа, прогресс и лог внизу. Сдержанная серая тема.
+"""Prismium — оконный инструмент: ролики слева, действия справа, прогресс и лог внизу. Сдержанная серая тема.
 
     pip install customtkinter
-    python orbis_app.py            (или Orbis.exe, см. build_exe.bat)
+    python prismium.py             (или Prismium.exe, см. build_exe.bat)
 
 Все действия запускают те же скрипты, что и из терминала (stick2r6.py, compare.py, tools/*.py, stickpose/train.py),
-отдельным процессом: окно не зависает, «Стоп» прерывает. Собранный Orbis.exe — только окно,
+отдельным процессом: окно не зависает, «Стоп» прерывает. Собранный Prismium.exe — только окно,
 скрипты он запускает установленным Python (тем, где стоят torch и opencv); лежать он должен в папке проекта.
 """
 import glob
@@ -17,7 +17,7 @@ import sys
 import threading
 
 HERE = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, "frozen", False) else __file__))
-CFG = os.path.join(HERE, "orbis_app.json")
+CFG = os.path.join(HERE, "prismium.json")
 VIDEO_EXT = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v")
 
 # два тёмно-серых (нейтральных, без синевы): фон окна и панели. Элементы внутри панели — цветом фона.
@@ -43,7 +43,7 @@ class App:
         self.proc, self.q, self.then = None, queue.Queue(), None
         self.cfg = self.load_cfg()
         self.sel, self.rows, self._last_cr = set(), [], False
-        root.title("Orbis")
+        root.title("Prismium")
         root.geometry(self.cfg.get("geometry", "1180x780"))
         root.minsize(980, 640)
         root.configure(fg_color=C["bg"])
@@ -98,7 +98,7 @@ class App:
         ctk = self.ctk
         top = ctk.CTkFrame(self.root, fg_color="transparent")
         top.pack(fill="x", padx=20, pady=(16, 12))
-        self.label(top, "Orbis", 20, bold=True).pack(side="left")
+        self.label(top, "Prismium", 20, bold=True).pack(side="left")
         self.label(top, "stickman → R6", 13, dim=True).pack(side="left", padx=(10, 0), pady=(4, 0))
         self.status = self.label(top, "", 12, dim=True)
         self.status.pack(side="right")
@@ -214,7 +214,7 @@ class App:
         r = self.hrow(s)
         self.hours = ctk.StringVar(value=self.cfg.get("hours", "8"))
         self.sps = ctk.StringVar(value=self.cfg.get("sps", "0.08"))
-        self.out = ctk.StringVar(value=self.cfg.get("out", "orbis2.pt"))
+        self.out = ctk.StringVar(value=self.cfg.get("out", "prismium2.pt"))
         self.field(r, "Часов", self.hours, 70)
         self.field(r, "с/шаг (из лога)", self.sps, 90)
         self.field(r, "Сохранить как", self.out, 170)
@@ -235,7 +235,7 @@ class App:
         s = self.card(t, "Сдать", "Средняя ошибка углов частей R6 — меньше лучше. Сравниваются веса сверху и перечисленные ниже.")
         r = self.hrow(s)
         self.cmp = ctk.StringVar(value=self.cfg.get("cmp", ""))
-        self.field(r, "Сравнить ещё с (через запятую: orbis.pt, orbis2.pt)", self.cmp, 320)
+        self.field(r, "Сравнить ещё с (через запятую: prismium.pt, prismium2.pt)", self.cmp, 320)
         r = self.hrow(s, (4, 0))
         self.button(r, "Сдать экзамен", self.do_exam_run, main=True).pack(side="left")
 
@@ -311,8 +311,9 @@ class App:
 
     # ---------- настройки ----------
     def load_cfg(self):
+        old = os.path.join(HERE, "orbis_app.json")   # настройки под старым именем
         try:
-            return json.load(open(CFG, encoding="utf-8"))
+            return json.load(open(CFG if os.path.exists(CFG) or not os.path.exists(old) else old, encoding="utf-8"))
         except Exception:
             return {}
 
@@ -328,7 +329,7 @@ class App:
         files = sorted(os.path.basename(p) for p in glob.glob(os.path.join(HERE, "weights", "*.pt")))
         self.wmenu.configure(values=files or [""])
         if self.weights.get() not in files and files:
-            self.weights.set("orbis.pt" if "orbis.pt" in files else files[-1])
+            self.weights.set(next((n for n in ("prismium.pt", "orbis.pt") if n in files), files[-1]))
 
     def add_videos(self):
         from tkinter import filedialog
