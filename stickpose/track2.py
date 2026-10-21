@@ -25,6 +25,10 @@ CFG = dict(
     max_jump=0.9,              # скачок больше 0.9 торса за кадр (не на смене плана) -> спросить
     cut_jump=4.0,              # смена плана: всё тело сдвинулось сильнее -> разрыв, плавность не требуем
     flag_level=1.0,
+    quiet=0,                   # рядом с разметкой (±кадров) не спрашивать: меньше вопросов, но ниже точность
+    w_len=3.0,                 # торс: шея-таз и голова-шея держат свою длину (штраф за |длина/норма - 1|)
+    w_reach=4.0,               # кисть/стопа дальше длины руки/ноги -> штраф за каждую лишнюю «длину торса»
+    reach=(1.3, 1.6),          # длина руки (от шеи) и ноги (от таза) в торсах, если разметки не говорят больше
 )
 
 
@@ -100,6 +104,9 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
         thick[:] = 10.0
     ok = ~np.isnan(thick)
     thick = np.interp(np.arange(n), np.nonzero(ok)[0], thick[ok])
+    # толщина шумит на эффектах/смазе: медиана по 5 кадрам, чтобы не было ложных «смен плана»
+    pad = np.pad(thick, 2, mode="edge")
+    thick = np.median(np.stack([pad[i:i + n] for i in range(5)]), axis=0)
     ratios = []
     for a, L in labels.items():
         if L.get("neck") is not None and L.get("hip") is not None:
@@ -121,8 +128,12 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
     sev = np.zeros(n)
     why = [[] for _ in range(n)]
 
+    near = np.zeros(n, bool)
+    for a in list(anchors) + list(skipped):
+        near[max(0, a - cfg["quiet"]):a + cfg["quiet"] + 1] = True
+
     def flag(f, s, msg):
-        if f in labels or f in skipped:
+        if near[f]:
             return
         sev[f] += s
         why[f].append(msg)
@@ -138,10 +149,17 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
                 fc = frames_c[a]
                 labels[a][j] = list(fc["peaks"][j][0][:2]) if fc and fc.get("ok") else [0.0, 0.0]
 
-    # ---- торс: голова, шея, таз — каждый своим Витерби (в нормированных единицах) ----
-    for j in ("head", "neck", "hip"):
+    # ---- торс цепочкой: таз, потом шея от таза, голова от шеи (длины звеньев держатся) ----
+    seg_len = {"neck": 1.0}
+    hn = [np.linalg.norm(lab_pt(a, "head") - lab_pt(a, "neck")) / T[a] for a in anchors]
+    seg_len["head"] = float(np.clip(np.median(hn), 0.15, 0.8)) if hn else 0.35
+    for j, par in (("hip", None), ("neck", "hip"), ("head", "neck")):
         anc = {a: lab_pt(a, j) for a in anchors}
-        prior = _interp_anchor(anc, anchors, n)
+        if par is None:
+            prior = _interp_anchor(anc, anchors, n)
+        else:  # «держать» = родитель + интерполированное смещение от него
+            rel = _interp_anchor({a: (anc[a] - lab_pt(a, par)) / T[a] for a in anchors}, anchors, n)
+            prior = P[:, JI[par]] + rel * T[:, None]
         X, U = [], []
         for f in range(n):
             if f in labels:
@@ -158,6 +176,9 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
             dA = np.min(np.abs(np.array(anchors) - f))
             wa_ = cfg["w_anchor"] * np.exp(-(dA - 1) / 2.0)
             us = [u + wa_ * np.linalg.norm(x - prior[f]) / T[f] for u, x in zip(us, xs)]
+            if par is not None:
+                us = [u + cfg["w_len"] * abs(np.linalg.norm(x - P[f, JI[par]]) / T[f] / seg_len[j] - 1)
+                      for u, x in zip(us, xs)]
             X.append(np.array(xs) / T[f])
             U.append(np.array(us))
         path, marg = _viterbi2(X, U, cuts, cfg["w_vel"], cfg["w_acc"])
@@ -203,6 +224,10 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
                 v.append((q - pa) / T[a])
             rel_a[a] = np.array(v)
         prior = _interp_anchor(rel_a, anchors, n)
+        reach = max(cfg["reach"][ch == "feet"], 1.15 * max(float(np.linalg.norm(v, axis=1).max()) for v in rel_a.values()))
+
+        def over(r):  # насколько конечность длиннее возможного
+            return cfg["w_reach"] * max(0.0, float(np.linalg.norm(r)) - reach)
         X, U = [], []
         for f in range(n):
             if f in labels:
@@ -223,7 +248,7 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
             xs, us = [], []
             for i, (r0, u0) in enumerate(o0):
                 for k, (r1, u1) in enumerate(o1):
-                    u = u0 + u1
+                    u = u0 + u1 + over(r0) + over(r1)
                     if i > 0 and k > 0 and i == k:
                         u += cfg["share_cost"]
                     u += wa_ * (np.linalg.norm(r0 - prior[f][0]) + np.linalg.norm(r1 - prior[f][1]))
@@ -249,7 +274,11 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
                 gap = float(marg[f][far].min() - marg[f][s]) if far.any() else 9.0
                 C[f, JI[j]] = 1.0 / (1.0 + np.exp(-(gap - cfg["amb_gap"]) * 4))
                 if gap < cfg["amb_gap"]:
-                    flag(f, 1.0 + (cfg["amb_gap"] - gap), f"{RU[j]}: два варианта")
+                    k = int(np.nonzero(far)[0][np.argmin(marg[f][far])])
+                    swap = np.linalg.norm(X[f][k] - X[f][s][[2, 3, 0, 1]]) < cfg["amb_dist"]
+                    # перестановка лево/право сама по себе не страшна (вид сбоку, руки перекрываются);
+                    # опасно только мелькание — его ловит проверка «рывок» ниже
+                    flag(f, 1.0 + (cfg["amb_gap"] - gap), f"{RU[j]}: " + ("лево/право?" if swap else "два варианта"))
 
     # ---- рывки (не на смене плана) ----
     for f in range(1, n):

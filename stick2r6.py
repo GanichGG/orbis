@@ -6,6 +6,7 @@
           --view side|front       вид в видео: сбоку (по умолчанию) или спереди
           --facing r,l            куда смотрит каждый персонаж в виде сбоку (r — вправо, l — влево)
           --weights путь.pt       веса модели (по умолчанию weights/stickpose.pt рядом со скриптом)
+          --quiet 1               не спрашивать кадры в ±N от уже размеченных (меньше вопросов, ниже точность)
           --fresh                 начать заново (иначе продолжит сохранённую разметку)
 Результат: <видео>.r6.json — его открывает blender_import_r6.py.
 Ваши разметки также сохраняются в weights/real/*.npz — на них можно дообучать модель (train.py --real).
@@ -122,6 +123,7 @@ def main():
     ap.add_argument("--no_plant", action="store_true", help="не фиксировать стопы на земле")
     ap.add_argument("--weights", default=os.path.join(HERE, "weights", "stickpose.pt"))
     ap.add_argument("--finetune_every", type=int, default=0, help="дообучать сеть после каждых N ответов (0 — авто: 4 на видеокарте, 10 на процессоре)")
+    ap.add_argument("--quiet", type=int, default=0)
     ap.add_argument("--fresh", action="store_true")
     a = ap.parse_args()
 
@@ -202,7 +204,7 @@ def main():
                     frames_c[k] = PL.run_model(model, inputs[k])
         ui.busy("Пересчитываю движение...")
         for k in (range(nc) if retrain else [c]):
-            results[k] = T.track(frames_c[k], labels[k], n, skipped=skipped[k])
+            results[k] = T.track(frames_c[k], labels[k], n, cfg={"quiet": a.quiet}, skipped=skipped[k])
 
     def ask(c, f, reason, progress):
         est = labels[c].get(f)
