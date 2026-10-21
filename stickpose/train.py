@@ -113,7 +113,11 @@ def load_real(d):
             if fn.endswith(".npz"):
                 z = np.load(os.path.join(d, fn))
                 x = z["x"] if z["x"].dtype == np.uint8 else z["x"].astype(np.float32)
-                out += list(zip(x, z["kp"].astype(np.float32)))
+                kp = z["kp"].astype(np.float32)
+                if kp.shape[1] == 7:  # старые разметки: локти/колени — середины рук/ног
+                    mid = lambda a, b: (kp[:, a] + kp[:, b]) / 2
+                    kp = np.concatenate([kp, np.stack([mid(1, 3), mid(1, 4), mid(2, 5), mid(2, 6)], 1)], 1)
+                out += list(zip(x, kp))
     return out or None
 
 
