@@ -7,3 +7,7 @@ __pycache__/
 weights/real/
 weights/stage*.pt
 *.blend1
+weights/mocap.npz
+weights/mocap_bvh/
+weights/pseudo/
+weights/exam/

@@ -10,6 +10,7 @@
 Расширяется добавлением стилей в Style и поз в sample_pose().
 """
 import math
+import os
 
 import cv2
 import numpy as np
@@ -143,6 +144,95 @@ def _keypoints(pts, head):
                      pts["l_arm_e"], pts["r_arm_e"], pts["l_leg_k"], pts["r_leg_k"]], float)
 
 
+MOCAP_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "weights", "mocap.npz")
+MOCAP_FRAC = 0.65   # доля примеров с позой/движением из записей людей (остальное — случайные позы, в т.ч. «дикие»)
+_MOCAP = None
+
+
+def mocap():
+    """Записи движений (tools/fetch_mocap.py) или None. Грузится один раз на процесс."""
+    global _MOCAP
+    if _MOCAP is None:
+        _MOCAP = False
+        if os.path.exists(MOCAP_PATH):
+            z = np.load(MOCAP_PATH)
+            J = list(z["joints"])
+            ok = z["length"] >= 16
+            _MOCAP = {"pos": z["pos"].astype(np.float32), "root": z["root"].astype(np.float32),
+                      "start": z["start"][ok], "length": z["length"][ok], "J": {j: i for i, j in enumerate(J)}}
+    return _MOCAP or None
+
+
+class MocapFigure:
+    """Человек из записи движения -> стикмен в 2D: случайный ракурс (чаще сбоку), пропорции Stick Nodes,
+    укорочения в перспективе сохраняются. fig(o) — поза через o кадров (30 fps, можно дробно) -> (pts, segs)."""
+
+    def __init__(self, rng, T, hip):
+        M = mocap()
+        self.M, self.T, self.hip = M, T, np.asarray(hip, float)
+        i = int(rng.integers(len(M["start"])))
+        self.step = float(rng.choice([0.5, 1, 1, 1, 2, 3], ))
+        margin = int(math.ceil(self.step * 4)) + 1
+        n = int(M["length"][i])
+        self.s0 = int(M["start"][i])
+        self.t = float(rng.integers(margin, max(margin + 1, n - margin)))
+        self.n = n
+        yaw = (math.pi / 2 * rng.choice([-1, 1]) + rng.normal(0, 0.45)) if rng.random() < 0.7 else rng.uniform(-math.pi, math.pi)
+        pitch, roll = rng.normal(0, 0.14), rng.normal(0, 0.08)
+        cz, sz, cx, sx, cy, sy = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch), math.cos(roll), math.sin(roll)
+        Rz = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+        Rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+        Ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+        self.R = Ry @ Rx @ Rz
+        self.prop = {"chest_len": rng.uniform(0.35, 0.6), "upper": rng.uniform(0.45, 0.75), "fore": rng.uniform(0.45, 0.75),
+                     "thigh": rng.uniform(0.5, 0.8), "shin": rng.uniform(0.5, 0.8)}
+        J = M["J"]
+        P0 = M["pos"][self.s0:self.s0 + n]
+        self.torso3 = float(np.median(np.linalg.norm(P0[:, J["neck"]] - P0[:, J["hip"]], axis=1))) + 1e-6
+        self.root0 = self._root(self.t)
+
+    def _frame(self, arr, t):
+        t = min(max(t, 0.0), self.n - 1.0)
+        a = int(math.floor(t))
+        b = min(a + 1, self.n - 1)
+        w = t - a
+        return arr[self.s0 + a] * (1 - w) + arr[self.s0 + b] * w
+
+    def _root(self, t):
+        return self._frame(self.M["root"], t)
+
+    def _2d(self, v3):
+        q = self.R @ v3
+        return np.array([q[0], -q[2]])
+
+    def __call__(self, o):
+        t = self.t + o
+        P3 = self._frame(self.M["pos"], t)
+        J, T, pr = self.M["J"], self.T, self.prop
+
+        def d2(a, b):
+            v3 = P3[J[b]] - P3[J[a]]
+            L = np.linalg.norm(v3)
+            return self._2d(v3) / L if L > 1e-6 else np.zeros(2)
+        hip = self.hip + self._2d(self._root(t) - self.root0) * (T / self.torso3)
+        pts = {"hip": hip}
+        pts["mid"] = hip + d2("hip", "chest") * T * (1 - pr["chest_len"])
+        pts["neck"] = pts["mid"] + d2("chest", "neck") * T * pr["chest_len"]
+        vh = d2("neck", "head")
+        if np.linalg.norm(vh) < 0.3:  # голова смотрит на камеру — вдоль торса
+            vh = pts["neck"] - hip
+        pts["head_dir"] = math.atan2(-vh[0], vh[1])
+        segs = [("hip", "mid"), ("mid", "neck")]
+        for side in ("l", "r"):
+            e = pts["neck"] + d2(side + "_sh", side + "_elbow") * T * pr["upper"]
+            pts[side + "_arm_e"], pts[side + "_arm_h"] = e, e + d2(side + "_elbow", side + "_hand") * T * pr["fore"]
+            kn = hip + d2(side + "_hipj", side + "_knee") * T * pr["thigh"]
+            pts[side + "_leg_k"], pts[side + "_leg_f"] = kn, kn + d2(side + "_knee", side + "_foot") * T * pr["shin"]
+            segs += [("neck", side + "_arm_e"), (side + "_arm_e", side + "_arm_h"),
+                     ("hip", side + "_leg_k"), (side + "_leg_k", side + "_leg_f")]
+        return pts, segs
+
+
 def _motion(rng, p, hip, T):
     """Позы и положения таза в соседних кадрах: (p_prev, hip_prev), (p_next, hip_next).
     Скорость — от почти неподвижной до резкого удара за кадр (как в Stick Nodes на 24-30 fps)."""
@@ -160,16 +250,40 @@ def _motion(rng, p, hip, T):
 
 
 def make_sample(rng):
-    """-> x (CIN,S,S) float32 [0..1], kp (7,2) в пикселях кропа, bones (HM,HM) — карта костей."""
+    """-> x (CIN,S,S) float32 [0..1], kp (11,2) в пикселях кропа, bones (HM,HM) — карта костей.
+    Поза и движение — из записей движений людей (mocap.npz, если есть; доля MOCAP_FRAC) или случайные."""
     big = S * 2
     T = rng.uniform(30, 50)
     cv_self = np.zeros((big * SS, big * SS), np.uint8)
     hip = np.array([big / 2, big / 2]) + rng.normal(0, 5, 2)
-    p, st, pts, segs = _figure(rng, T, hip)
+    use_mc = mocap() is not None and rng.random() < MOCAP_FRAC
+    if use_mc:
+        st = sample_style(rng)
+        fig = MocapFigure(rng, T, hip)
+        k = fig.step
+        pts, segs = fig(0)
+        nb_poses = [fig(-k), fig(k)]
+        smear = [fig(t) for t in np.linspace(-k, 0, 6)[:-1]] if rng.random() < 0.2 else []
+        ghosts = [fig(-k * (g + 1)) for g in range(int(rng.integers(1, 4)))] if rng.random() < 0.15 else []
+    else:
+        p, st, pts, segs = _figure(rng, T, hip)
+        nb_poses = [forward(q, hq, T) for q, hq in _motion(rng, p, hip, T)]
+        smear, ghosts = [], []
+        if rng.random() < 0.2:  # смаз движения: копии позы на пути к ней
+            p0 = {k: (v + rng.normal(0, 0.5) if k in ANG else v) for k, v in p.items()}
+            shift = rng.normal(0, T * 0.4, 2)
+            for t in np.linspace(0, 1, 6)[:-1]:
+                pt = {k: (p0[k] * (1 - t) + p[k] * t) if isinstance(p[k], float) else p[k] for k in p}
+                smear.append(forward(pt, hip - shift * (1 - t), T))
+        if rng.random() < 0.15:  # шлейф-«призраки»
+            back = rng.normal(0, T * 0.5, 2)
+            for g in range(int(rng.integers(1, 4))):
+                pg = {k: (v + rng.normal(0, 0.25) if k in ANG else v) for k, v in p.items()}
+                ghosts.append(forward(pg, hip + back * (g + 1), T))
     # соседние кадры: та же фигура в движении; иногда кадра нет (край видео/нет маски) или там смена плана
     # (рисуются без суперсэмплинга: это грубая подсказка о движении, а так вдвое быстрее)
     nbs = []
-    for q, hq in _motion(rng, p, hip, T):
+    for qp, qs in nb_poses:
         cv_n = np.zeros((big, big), np.uint8)
         r = rng.random()
         if r < 0.07:
@@ -178,34 +292,18 @@ def make_sample(rng):
             _, st2, pts2, segs2 = _figure(rng, T * rng.uniform(0.5, 1.6), hip + rng.normal(0, T, 2))
             render(cv_n, pts2, segs2, T, st2, ss=1)
         else:
-            qp, qs = forward(q, hq, T)
             render(cv_n, qp, qs, T, st, ss=1)
         nbs.append(cv_n)
-
-    # смаз движения: копии позы на пути к ней
-    if rng.random() < 0.2:
-        p0 = dict(p)
-        for k in p0:
-            if k in ("torso", "chest", "head", "l_arm", "r_arm", "l_leg", "r_leg", "l_arm2", "r_arm2", "l_leg2", "r_leg2"):
-                p0[k] = p[k] + rng.normal(0, 0.5)
-        shift = rng.normal(0, T * 0.4, 2)
-        for t in np.linspace(0, 1, 6)[:-1]:
-            pt = {k: (p0[k] * (1 - t) + p[k] * t) if isinstance(p[k], float) else p[k] for k in p}
-            q, sg = forward(pt, hip - shift * (1 - t), T)
-            st2 = dict(st, thick=st["thick"] * rng.uniform(0.6, 1.0))
-            render(cv_self, q, sg, T, st2)
-    # шлейф-«призраки» (послеобразы того же цвета): тоньше и рваные, сдвинуты назад по движению
-    if rng.random() < 0.15:
-        back = rng.normal(0, T * 0.5, 2)
-        for g in range(int(rng.integers(1, 4))):
-            pg = {k: (v + rng.normal(0, 0.25) if k in ANG else v) for k, v in p.items()}
-            q, sg = forward(pg, hip + back * (g + 1), T)
-            ghost = np.zeros_like(cv_self)
-            render(ghost, q, sg, T, dict(st, thick=st["thick"] * rng.uniform(0.4, 0.9)))
-            holes = (rng.random((ghost.shape[0] // 32 + 1, ghost.shape[1] // 32 + 1)) < 0.35).astype(np.uint8)
-            holes = cv2.resize(holes, (ghost.shape[1], ghost.shape[0]), interpolation=cv2.INTER_NEAREST)
-            ghost[holes > 0] = 0
-            cv_self |= ghost
+    for q, sg in smear:
+        render(cv_self, q, sg, T, dict(st, thick=st["thick"] * rng.uniform(0.6, 1.0)))
+    # шлейф-«призраки» (послеобразы того же цвета): тоньше и рваные
+    for q, sg in ghosts:
+        ghost = np.zeros_like(cv_self)
+        render(ghost, q, sg, T, dict(st, thick=st["thick"] * rng.uniform(0.4, 0.9)))
+        holes = (rng.random((ghost.shape[0] // 32 + 1, ghost.shape[1] // 32 + 1)) < 0.35).astype(np.uint8)
+        holes = cv2.resize(holes, (ghost.shape[1], ghost.shape[0]), interpolation=cv2.INTER_NEAREST)
+        ghost[holes > 0] = 0
+        cv_self |= ghost
     head = render(cv_self, pts, segs, T, st)
     kp = _keypoints(pts, head)
 
@@ -215,7 +313,11 @@ def make_sample(rng):
     for _ in range(rng.choice([0, 1, 1, 2], p=[0.35, 0.35, 0.2, 0.1])):
         T2 = T * rng.uniform(0.6, 1.5)
         hip2 = hip + rng.normal(0, T * 1.0, 2)
-        _, st2, pts2, segs2 = _figure(rng, T2, hip2)
+        if use_mc and rng.random() < 0.6:
+            st2 = sample_style(rng)
+            pts2, segs2 = MocapFigure(rng, T2, hip2)(0)
+        else:
+            _, st2, pts2, segs2 = _figure(rng, T2, hip2)
         tmp = np.zeros_like(cv_self)
         render(tmp, pts2, segs2, T2, st2)
         cv_other |= tmp
