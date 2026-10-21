@@ -20,12 +20,14 @@ HERE = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, "frozen", Fal
 CFG = os.path.join(HERE, "orbis_app.json")
 VIDEO_EXT = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v")
 
-# серая палитра без цветных акцентов: фон -> панели -> карточки/поля -> кнопки -> текст
-C = {"bg": "#1b1b1c", "panel": "#232325", "card": "#2a2a2d", "field": "#1f1f21", "line": "#333336",
-     "btn": "#313134", "btn_hover": "#3b3b3f", "main": "#e6e6e6", "main_hover": "#cfcfcf", "main_text": "#1b1b1c",
-     "sel": "#3a3a3e", "text": "#e2e2e4", "dim": "#8a8a90", "faint": "#5f5f65", "bar": "#bdbdc2"}
-R = 12          # скругление панелей
-RB = 8          # скругление кнопок и полей
+# два тёмно-серых, как в тёмной теме Firefox: фон окна и панели. Элементы внутри панели — цветом фона.
+# Без обводок; наведение — чуть светлее панели. Текст — светлый и приглушённый.
+BG, PANEL, HOVER = "#1c1b22", "#2b2a33", "#34333c"
+TEXT, DIM = "#fbfbfe", "#9f9ea8"
+C = {"bg": BG, "panel": PANEL, "card": PANEL, "field": BG, "line": BG, "btn": BG, "btn_hover": HOVER,
+     "main": BG, "main_hover": HOVER, "main_text": TEXT, "sel": BG, "text": TEXT, "dim": DIM, "faint": DIM, "bar": DIM}
+R = 16          # скругление панелей
+RB = 10         # скругление кнопок и полей
 
 
 def font(size=13, weight="normal"):
@@ -54,29 +56,27 @@ class App:
     # ---------- элементы ----------
     def button(self, parent, text, cmd, main=False, width=0):
         ctk = self.ctk
-        return ctk.CTkButton(parent, text=text, command=cmd, corner_radius=RB, height=34, width=width or 0,
-                             fg_color=C["main"] if main else C["btn"], hover_color=C["main_hover"] if main else C["btn_hover"],
-                             text_color=C["main_text"] if main else C["text"], font=font(13, "bold" if main else "normal"))
+        return ctk.CTkButton(parent, text=text, command=cmd, corner_radius=RB, height=36, width=width or 0,
+                             fg_color=BG, hover_color=HOVER, text_color=TEXT, border_width=0,
+                             font=font(13, "bold" if main else "normal"))
 
     def label(self, parent, text, size=13, dim=False, bold=False, **kw):
         return self.ctk.CTkLabel(parent, text=text, text_color=C["dim"] if dim else C["text"],
                                  font=font(size, "bold" if bold else "normal"), **kw)
 
     def entry(self, parent, var, width=90, hint=""):
-        return self.ctk.CTkEntry(parent, textvariable=var, width=width, height=34, corner_radius=RB, fg_color=C["field"],
-                                 border_color=C["line"], border_width=1, text_color=C["text"], font=font(13))
+        return self.ctk.CTkEntry(parent, textvariable=var, width=width, height=36, corner_radius=RB, fg_color=BG,
+                                 border_width=0, text_color=TEXT, font=font(13))
 
     def check(self, parent, text, var):
-        return self.ctk.CTkCheckBox(parent, text=text, variable=var, corner_radius=5, border_width=2, checkbox_width=18,
-                                    checkbox_height=18, fg_color=C["main"], hover_color=C["btn_hover"],
-                                    border_color=C["faint"], checkmark_color=C["main_text"], text_color=C["text"],
-                                    font=font(13))
+        return self.ctk.CTkSwitch(parent, text=text, variable=var, switch_width=34, switch_height=18,
+                                  fg_color=BG, progress_color=DIM, button_color=TEXT, button_hover_color=TEXT,
+                                  text_color=TEXT, font=font(13))
 
     def card(self, parent, title, note=None):
-        f = self.ctk.CTkFrame(parent, fg_color=C["card"], corner_radius=R)
-        f.pack(fill="x", pady=(0, 12))
-        inner = self.ctk.CTkFrame(f, fg_color="transparent")
-        inner.pack(fill="x", padx=20, pady=16)
+        """Раздел внутри панели — без своей подложки: заголовок, пояснение, содержимое, воздух."""
+        inner = self.ctk.CTkFrame(parent, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=(10, 22))
         self.label(inner, title, 15, bold=True).pack(anchor="w")
         if note:
             self.label(inner, note, 12, dim=True, wraplength=620, justify="left").pack(anchor="w", pady=(2, 12))
@@ -103,9 +103,9 @@ class App:
         self.status = self.label(top, "", 12, dim=True)
         self.status.pack(side="right")
         self.weights = ctk.StringVar(value=self.cfg.get("weights", ""))
-        self.wmenu = ctk.CTkOptionMenu(top, variable=self.weights, values=[""], width=200, height=32, corner_radius=RB,
-                                       fg_color=C["btn"], button_color=C["btn"], button_hover_color=C["btn_hover"],
-                                       dropdown_fg_color=C["card"], dropdown_hover_color=C["sel"],
+        self.wmenu = ctk.CTkOptionMenu(top, variable=self.weights, values=[""], width=200, height=34, corner_radius=RB,
+                                       fg_color=PANEL, button_color=PANEL, button_hover_color=HOVER,
+                                       dropdown_fg_color=PANEL, dropdown_hover_color=HOVER,
                                        dropdown_text_color=C["text"], text_color=C["text"], font=font(13),
                                        dropdown_font=font(13))
         self.wmenu.pack(side="right", padx=(0, 16))
@@ -120,10 +120,10 @@ class App:
         head = ctk.CTkFrame(left, fg_color="transparent")
         head.pack(fill="x", padx=16, pady=(14, 6))
         self.label(head, "Ролики", 15, bold=True).pack(side="left")
-        ctk.CTkButton(head, text="+", width=32, height=28, corner_radius=RB, fg_color=C["btn"],
-                      hover_color=C["btn_hover"], text_color=C["text"], font=font(16), command=self.add_videos).pack(side="right")
+        ctk.CTkButton(head, text="+", width=32, height=30, corner_radius=RB, fg_color=BG, hover_color=HOVER,
+                      text_color=TEXT, font=font(16), command=self.add_videos).pack(side="right")
         self.vbox = ctk.CTkScrollableFrame(left, fg_color="transparent", corner_radius=0,
-                                           scrollbar_button_color=C["btn"], scrollbar_button_hover_color=C["btn_hover"])
+                                           scrollbar_button_color=PANEL, scrollbar_button_hover_color=HOVER)
         self.vbox.pack(fill="both", expand=True, padx=8)
         self.empty = self.label(self.vbox, "Нажмите «+», чтобы добавить ролики", 12, dim=True)
         foot = ctk.CTkFrame(left, fg_color="transparent")
@@ -136,20 +136,27 @@ class App:
         # справа — действия во вкладках
         right = ctk.CTkFrame(body, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True, padx=(16, 0))
-        tabs = ctk.CTkTabview(right, fg_color=C["panel"], corner_radius=R, segmented_button_fg_color=C["field"],
-                              segmented_button_selected_color=C["btn_hover"],
-                              segmented_button_selected_hover_color=C["btn_hover"],
-                              segmented_button_unselected_color=C["field"],
-                              segmented_button_unselected_hover_color=C["btn"], text_color=C["text"],
-                              anchor="w")
-        tabs.pack(fill="both", expand=True)
-        tabs._segmented_button.configure(font=font(14), height=36, corner_radius=RB)
+        # вкладки как в браузере: над панелью, выбранная — цвета панели и сливается с ней
+        pages = {}
+        holder = ctk.CTkFrame(right, fg_color=PANEL, corner_radius=R)
+
+        def show(name):
+            for n, pg in pages.items():
+                pg.pack_forget()
+            pages[name].pack(fill="both", expand=True, padx=10, pady=10)
+        seg = ctk.CTkSegmentedButton(right, values=["Ролик", "Обучение", "Экзамен"], command=show, height=36,
+                                     corner_radius=RB, border_width=0, fg_color=BG, selected_color=PANEL,
+                                     selected_hover_color=PANEL, unselected_color=BG, unselected_hover_color=BG,
+                                     text_color=TEXT, font=font(14))
+        seg.pack(anchor="w", pady=(0, 6))
+        holder.pack(fill="both", expand=True)
         for name, fill in (("Ролик", self.tab_video), ("Обучение", self.tab_train), ("Экзамен", self.tab_exam)):
-            t = tabs.add(name)
-            area = ctk.CTkScrollableFrame(t, fg_color="transparent", scrollbar_button_color=C["panel"],
-                                          scrollbar_button_hover_color=C["btn"])
-            area.pack(fill="both", expand=True, padx=4, pady=(4, 0))
+            area = ctk.CTkScrollableFrame(holder, fg_color="transparent", scrollbar_button_color=PANEL,
+                                          scrollbar_button_hover_color=HOVER)
             fill(area)
+            pages[name] = area
+        seg.set("Ролик")
+        show("Ролик")
 
         # низ — прогресс и лог
         bottom = ctk.CTkFrame(self.root, fg_color=C["panel"], corner_radius=R)
@@ -159,16 +166,16 @@ class App:
         self.task = self.label(bar, "Готов", 13)
         self.task.pack(side="left")
         self.stop_btn = self.button(bar, "Стоп", self.stop, width=90)
-        self.stop_btn.configure(state="disabled", text_color_disabled=C["faint"])
+        self.stop_btn.configure(state="disabled", text_color_disabled=DIM)
         self.stop_btn.pack(side="right")
-        self.prog = ctk.CTkProgressBar(bar, width=300, height=6, corner_radius=3, fg_color=C["field"],
-                                       progress_color=C["bar"])
+        self.prog = ctk.CTkProgressBar(bar, width=300, height=4, corner_radius=2, fg_color=BG, progress_color=DIM,
+                                       border_width=0)
         self.prog.set(0)
         self.prog.pack(side="right", padx=16)
-        self.log = ctk.CTkTextbox(bottom, height=170, corner_radius=RB, fg_color=C["field"], text_color="#b4b4b8",
+        self.log = ctk.CTkTextbox(bottom, height=170, corner_radius=RB, fg_color=BG, text_color=DIM,
                                   border_width=0, font=ctk.CTkFont(family="Consolas" if sys.platform.startswith("win")
                                                                    else "DejaVu Sans Mono", size=12),
-                                  scrollbar_button_color=C["btn"], wrap="word")
+                                  scrollbar_button_color=PANEL, scrollbar_button_hover_color=HOVER, wrap="word")
         self.log.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self.log.configure(state="disabled")
 
