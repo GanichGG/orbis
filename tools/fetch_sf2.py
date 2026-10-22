@@ -38,14 +38,17 @@ class Assets:
         self.names = names
 
     def find(self, suffix):
-        return [n for n in self.names if n.replace("\\", "/").endswith(suffix)]
+        return [n for n in self.names if n.replace("\\", "/").lower().endswith(suffix.lower())]
 
     def read(self, name):
         return self.zip.read(name) if self.zip else open(os.path.join(self.root, name), "rb").read()
 
 
 def skeleton_order(assets):
-    p = assets.find("Models/Dependencies/skeleton.xml") or assets.find("skeleton.xml")
+    p = assets.find("Models/Dependencies/skeleton.xml") or assets.find("/skeleton.xml") or assets.find("skeleton.xml")
+    if not p:
+        sys.exit("Не нашёл Models/Dependencies/skeleton.xml. Укажите архив .zip целиком или папку «Shadow Fight 2 Assets»\n"
+                 "(в ней должны быть папки Animations и Models), а не подпапку.")
     s = assets.read(p[0]).decode("cp1251", "ignore")
     nodes = s.split("<Nodes>")[1].split("</Nodes>")[0]
     return [n for n, _ in re.findall(r'<(\S+) Type="(\w+)"', nodes)]
@@ -66,7 +69,12 @@ def load_anim(b):
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    assets = Assets(sys.argv[1])
+    path = sys.argv[1].strip('"')
+    if not os.path.exists(path):
+        sys.exit(f"Нет такого пути: {path}")
+    if os.path.isdir(path) and os.path.basename(os.path.normpath(path)).lower() in ("animations", "models"):
+        path = os.path.dirname(os.path.normpath(path))   # указали подпапку — берём папку ассетов
+    assets = Assets(path)
     order = skeleton_order(assets)
     idx = {n: i for i, n in enumerate(order)}
     seqs, names = [], []
