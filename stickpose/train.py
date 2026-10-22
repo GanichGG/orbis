@@ -71,7 +71,7 @@ def loss_fn(logits, target):
 
 
 def train(model, steps, lr=2e-3, bs=32, real=None, real_frac=0.0, log_every=200, workers=None, ckpt=None,
-          on_log=None, state=None, pseudo=None, pseudo_frac=0.0):
+          on_log=None, state=None, pseudo=None, pseudo_frac=0.0, gate=None, gate_every=5000):
     """state — состояние оборванного обучения из чекпойнта (шаг, оптимизатор, расписание): продолжить с него."""
     dev = next(model.parameters()).device
     ds = SynthStream(real=real, real_frac=real_frac, pseudo=pseudo, pseudo_frac=pseudo_frac if pseudo else 0.0)
@@ -116,6 +116,10 @@ def train(model, steps, lr=2e-3, bs=32, real=None, real_frac=0.0, log_every=200,
             if ckpt and step < steps:
                 save(model, ckpt, {"steps": step, "total": steps, "lr": lr, "bs": bs,
                                    "opt": opt.state_dict(), "sched": sched.state_dict()})
+        if gate and (step % gate_every == 0 or step == steps):   # «биннинг»: проверка и снимки по уровням
+            model.eval()
+            gate(step, model)
+            model.train()
     model.eval()
     return model
 
@@ -144,6 +148,43 @@ def load_real(d):
     return out or None
 
 
+# уровни Orbis («биннинг», как у процессоров): учим всегда на Magnum, снимки по достигнутому уровню.
+# Пороги — по оценке экзамена 0..10 (если экзамена нет — по синтетике, она легче, пороги выше).
+TIERS = [("epigram", 7.0, 9.2), ("ballad", 7.8, 9.4), ("ode", 8.5, 9.6), ("magnum", 9.0, 9.8)]
+
+
+def make_gate(out_dir, prefix="orbis", log=print):
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
+    import evaluate as EV
+    exam = None
+    try:
+        import exam as EX
+        data = EX.load_exam()
+        if data:
+            exam = (EX, data)
+    except Exception as e:
+        log(f"(экзамен недоступен: {e})")
+
+    def gate(step, model):
+        syn = float(np.mean([a for a, _, _ in EV.synth_eval(model, n=300).values()]) * 10)
+        ex = exam[0].exam_score(model, exam[1])[0] if exam else None
+        mark, col = (ex, 1) if ex is not None else (syn, 2)
+        msg = f"проверка на шаге {step}: синтетика {syn:.2f}/10" + (f", экзамен {ex:.2f}/10" if ex is not None else "")
+        log(msg)
+        for t in TIERS:
+            if mark < t[col]:
+                break
+            path = os.path.join(out_dir, f"{prefix}-{t[0]}.pt")
+            old = None
+            if os.path.exists(path):
+                old = torch.load(path, map_location="cpu", weights_only=False).get("extra", {}).get("mark")
+            if old is None or mark > old:
+                save(model, path, {"tier": t[0], "mark": mark, "exam": ex, "synth": syn, "steps": step})
+                log(f"★ уровень {t[0].upper()} ({'экзамен' if col == 1 else 'синтетика'} {mark:.2f} ≥ {t[col]}) -> {path}")
+    return gate
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--steps", type=int, default=20000)
@@ -157,6 +198,7 @@ def main():
     ap.add_argument("--pseudo", default=None, help="папка с кадрами самообучения (tools/selftrain.py)")
     ap.add_argument("--pseudo_frac", type=float, default=0.25)
     ap.add_argument("--workers", type=int, default=None)
+    ap.add_argument("--gate_every", type=int, default=5000, help="проверка уровней каждые N шагов (0 — выкл)")
     a = ap.parse_args()
     dev = device()
     print("устройство:", dev)
@@ -167,7 +209,8 @@ def main():
             print("веса v1 -> Orbis v2 (соседние кадры + карта костей), знания старой модели сохраняются")
             model = upgrade(model).train()
         ex = torch.load(a.resume, map_location="cpu", weights_only=False).get("extra", {})
-        if "opt" in ex and ex["steps"] < ex["total"]:
+        same = os.path.abspath(a.resume) == os.path.abspath(a.out)
+        if "opt" in ex and ex["steps"] < ex["total"] and same:   # продолжить — только «тот же файл в тот же файл»
             state = ex
             a.steps, a.lr, a.bs = ex["total"], ex["lr"], ex["bs"]
             print(f"продолжаю оборванное обучение с шага {ex['steps']} из {ex['total']}")
@@ -180,8 +223,17 @@ def main():
     pseudo = load_real(a.pseudo)
     if pseudo:
         print("кадров самообучения:", len(pseudo))
+    gate = None
+    if a.gate_every:
+        logf = os.path.splitext(a.out)[0] + ".log"
+
+        def log(m):
+            print(m)
+            with open(logf, "a", encoding="utf-8") as fh:
+                fh.write(m + "\n")
+        gate = make_gate(os.path.dirname(os.path.abspath(a.out)), log=log)
     train(model, a.steps, a.lr, a.bs, real, a.real_frac if real else 0.0, workers=a.workers, ckpt=a.out, state=state,
-          pseudo=pseudo, pseudo_frac=a.pseudo_frac)
+          pseudo=pseudo, pseudo_frac=a.pseudo_frac, gate=gate, gate_every=a.gate_every)
     save(model, a.out, {"steps": a.steps})
     print("сохранено:", a.out)
 

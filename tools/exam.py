@@ -141,28 +141,36 @@ def score(pred, g):
     return res, pts
 
 
-def run(a):
+def load_exam():
     files = sorted(os.path.join(EXAM, f) for f in os.listdir(EXAM) if f.endswith(".npz")) if os.path.isdir(EXAM) else []
-    if not files:
+    return [np.load(f) for f in files]
+
+
+def exam_score(model, data):
+    """-> (оценка 0..10, ошибки частей {часть: [°]}, точки {точка: [доля торса]})."""
+    parts, pts = {}, {}
+    for d in data:
+        for x, Mx, g in zip(d["x"], d["M"], d["gt"]):
+            r, p = score(predict_points(model, x, Mx), g)
+            for k in ("Торс", "Голова"):
+                parts.setdefault(k, []).append(r[k])
+            for k in ("Руки", "Ноги"):
+                parts.setdefault(k, []).extend(r[k + "_все"])
+            for k, v in p.items():
+                pts.setdefault(k, []).append(v)
+    allp = np.concatenate([np.ravel(v) for v in parts.values()])
+    return max(0.0, min(10.0, 10 * (30 - allp.mean()) / 27)), parts, pts   # 3° -> 10, 10° -> 7.4, 30° -> 0
+
+
+def run(a):
+    data = load_exam()
+    if not data:
         sys.exit("Нет экзамена: сначала python tools/exam.py make видео.mp4")
-    data = [np.load(f) for f in files]
-    n = sum(len(d["x"]) for d in data)
-    print(f"экзамен: {n} кадров из {len(files)} роликов")
+    print(f"экзамен: {sum(len(d['x']) for d in data)} кадров из {len(data)} роликов")
     for w in a.weights:
-        model = load(w, device())
-        parts, pts = {}, {}
-        for d in data:
-            for x, Mx, g in zip(d["x"], d["M"], d["gt"]):
-                r, p = score(predict_points(model, x, Mx), g)
-                for k in ("Торс", "Голова"):
-                    parts.setdefault(k, []).append(r[k])
-                for k in ("Руки", "Ноги"):
-                    parts.setdefault(k, []).extend(r[k + "_все"])
-                for k, v in p.items():
-                    pts.setdefault(k, []).append(v)
+        mark, parts, pts = exam_score(load(w, device()), data)
         allp = np.concatenate([np.ravel(v) for v in parts.values()])
-        score = max(0.0, min(10.0, 10 * (30 - allp.mean()) / 27))   # 3° -> 10, 10° -> 7.4, 30° -> 0
-        print(f"\n{os.path.basename(w)}:  ОЦЕНКА {score:.1f}/10   (средняя ошибка {allp.mean():.1f}°, "
+        print(f"\n{os.path.basename(w)}:  ОЦЕНКА {mark:.1f}/10   (средняя ошибка {allp.mean():.1f}°, "
               f"частей точнее 15°: {(allp < 15).mean() * 100:.0f}%; Epigram — от 7)")
         print("  части R6: " + ",  ".join(f"{k} {np.mean(v):.1f}°" for k, v in parts.items()))
         print("  точки ближе 10% торса: " + ",  ".join(f"{k} {(np.array(v) < 0.1).mean() * 100:.0f}%" for k, v in pts.items()))
