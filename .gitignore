@@ -20,3 +20,5 @@ orbis.json
 weights/*.log
 weights/sf2.npz
 videos/
+*.zip
+orbis_app.json
