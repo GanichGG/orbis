@@ -3,7 +3,7 @@
     python orbis.py
 
 Цифра — действие, Enter — назад. Список роликов и настройки хранятся в orbis.json рядом.
-Действия запускают те же скрипты (stick2r6.py, compare.py, tools/*.py, stickpose/train.py), их вывод идёт сюда же;
+Действия запускают те же скрипты (app/stick2r6.py, app/compare.py, tools/*.py, stickpose/train.py), их вывод идёт сюда же;
 Ctrl+C прерывает текущее действие и возвращает в меню.
 """
 import glob
@@ -135,7 +135,7 @@ def main():
         elif k == "label":
             v = pick_video(cfg)
             if v:
-                args = ["stick2r6.py", v[0], "--weights", w]
+                args = ["app/stick2r6.py", v[0], "--weights", w]
                 s, e = ask("С кадра", 0), ask("По кадр (пусто — до конца)")
                 args += ["--start", s] + (["--end", e] if e else [])
                 if ask("Начать заново? (д/н)", "н").lower().startswith(("д", "y")):
@@ -149,7 +149,7 @@ def main():
         elif k == "compare":
             v = pick_video(cfg)
             if v:
-                run(["compare.py", v[0]])
+                run(["app/compare.py", v[0]])
                 out = os.path.splitext(v[0])[0] + "_compare.mp4"
                 if os.path.exists(out) and os.name == "nt":
                     os.startfile(out)

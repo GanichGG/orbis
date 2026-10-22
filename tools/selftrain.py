@@ -17,7 +17,7 @@ import sys
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path[:0] = [os.path.join(ROOT, "stickpose"), ROOT]
+sys.path[:0] = [os.path.join(ROOT, "stickpose"), os.path.join(ROOT, "app"), ROOT]
 
 import colorseg as CS          # noqa: E402
 import pipeline as PL          # noqa: E402

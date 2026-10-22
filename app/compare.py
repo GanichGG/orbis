@@ -1,6 +1,6 @@
 """Сравнение «видео | R6»: насколько анимация повторяет оригинал.
 
-Запуск:   python compare.py видео.mp4 [видео.r6.json] [--start N] [--all]
+Запуск:   python app/compare.py видео.mp4 [видео.r6.json] [--start N] [--all]
 Результат: <видео>_compare.mp4 — слева видео с найденными точками, справа то же видео с наложенным R6
 (вид сбоку, как его поставит импорт: торс по линии таз→шея, рука по предплечью локоть→кисть,
 нога по голени колено→стопа; у старых файлов без локтей/колен — шея→кисть и таз→стопа).
@@ -16,7 +16,7 @@ import sys
 import cv2
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "stickpose"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stickpose"))
 import motion as MO  # noqa: E402
 
 EV_TXT = {"hit": "HIT", "got_hit": "GOT HIT", "windup": "WINDUP", "stop": "STOP", "extreme": "", "dash": "DASH",

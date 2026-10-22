@@ -1,5 +1,5 @@
 """Проверка импорта на риг пользователя (без окна Blender, нужен `pip install bpy`):
-    python tools/test_ik.py basefile.blend [файл.r6.json]
+    python tools/test_ik.py blender/basefile.blend [файл.r6.json]
 Без json — делает синтетического персонажа (11 точек, плавная анимация, иногда «дикие» позы).
 Меряет, насколько части R6 (InternalArmature) смотрят туда же, куда части стикмена по правилу переноса:
 торс таз->шея, голова шея->голова, рука локоть->кисть, нога колено->стопа."""
@@ -52,7 +52,7 @@ bpy.ops.wm.open_mainfile(filepath=blend)
 P = bpy.data.objects["__PrimaryArmature"]
 I = bpy.data.objects["InternalArmature"]
 g = {"__name__": "x"}
-exec(compile(open(os.path.join(ROOT, "blender_import_ikrig.py"), encoding="utf-8").read(), "ik", "exec"), g)
+exec(compile(open(os.path.join(ROOT, "blender", "blender_import_ikrig.py"), encoding="utf-8").read(), "ik", "exec"), g)
 t0 = time.time()
 g["run"](jpath)
 print("время импорта", round(time.time() - t0, 1), "с")

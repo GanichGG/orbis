@@ -1,6 +1,6 @@
 """stick2r6 — видео со стикменами -> анимация R6 для Blender (нейросеть StickPose + ваши ответы).
 
-Запуск:   python stick2r6.py путь/к/видео.mp4
+Запуск:   python app/stick2r6.py путь/к/видео.mp4   (или меню: python orbis.py)
 Опции:    --start 0 --end 300     кусок видео (номера кадров)
           --first 6               сколько разных поз спросить в начале у каждого персонажа
           --view side|front       вид в видео: сбоку (по умолчанию) или спереди
@@ -21,9 +21,9 @@ import time
 import cv2
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # корень проекта (скрипт лежит в app/)
 sys.path.insert(0, os.path.join(HERE, "stickpose"))
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "app"))
 
 import colorseg as CS          # noqa: E402
 import pipeline as PL          # noqa: E402

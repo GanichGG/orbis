@@ -8,7 +8,7 @@ pip install opencv-python numpy scipy scikit-image pillow torch
 
 ## 1. Разметка видео
 ```
-python stick2r6.py видео.mp4 --facing r,l
+python app/stick2r6.py видео.mp4 --facing r,l
 ```
 Опции: `--start/--end` (кусок видео, кадры), `--first 6` (сколько разных поз спросить сначала),
 `--view front` (видео снято спереди), `--fresh` (начать заново).
@@ -24,9 +24,9 @@ python stick2r6.py видео.mp4 --facing r,l
 Ваши разметки также сохраняются в `weights/real/*.npz`: это датасет для дообучения модели.
 
 ## 2. Импорт в Blender (5.x)
-**Твой IK-риг:** `blender_import_ikrig.py` (MasterControl, LowerTorso-FK, IK ног, FK рук/головы; `LEG_MODE` = plant/straight).
+**Твой IK-риг:** `blender/blender_import_ikrig.py` (MasterControl, LowerTorso-FK, IK ног, FK рук/головы; `LEG_MODE` = plant/straight).
 **Простой R6-скелет:**
-Scripting → Open → `blender_import_r6.py` → Run Script, затем выберите `.r6.json` в окне.
+Scripting → Open → `blender/blender_import_r6.py` → Run Script, затем выберите `.r6.json` в окне.
 Если выделен ваш R6-риг (Torso, Head, Left/Right Arm, Left/Right Leg), анимация ляжет на него,
 иначе создастся новый. Ошибки показываются в строке состояния, подробности — в системной консоли.
 

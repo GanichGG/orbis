@@ -20,6 +20,11 @@
 Пользователь кликает пипеткой по персонажам, программа размечает суставы нейросетью, спрашивает
 только спорные кадры, дообучается на ответах, экспортирует `.r6.json`, импортёр ставит ключи в Blender.
 
+## Папки
+`orbis.py` (меню, точка входа) · `app/` — stick2r6.py, ui.py, compare.py · `blender/` — импорт и риг basefile.blend ·
+`stickpose/` — сеть, трекер, обучение · `tools/` — экзамен, самообучение, базы движений, проверки ·
+`weights/` — веса и данные (не в git) · `videos/` — ролики пользователя (не в git).
+
 ## Конвейер (файлы)
 - `stick2r6.py` — главная программа (CLI + окна OpenCV из `ui.py`): пипетка → выделение → сеть → трекинг →
   вопросы (сначала разные позы `--first`, потом спорные) → дообучение каждые N ответов → проверка → экспорт.
@@ -75,7 +80,7 @@ Head, Left/Right Arm/Leg; ведомый, напрямую не ключеват
   (таз = низ торса R6, торс стикмена = 2 шпильки). Проверка: 0,00 шп. Этап 2 (план): «разумное расстояние» от плеча/таза.
 - `LIMB_RULE` (по умолчанию): руки FK по предплечью; ноги — IK-цель = таз + бедро·u + голень·d, если полюс согнул
   колено не туда — нога прямо по голени + доворот цели. Ключи ставятся с интерполяцией `INTERP` (LINEAR).
-- Проверка `python tools/test_ik.py basefile.blend` (синтетика 11 точек, все кадры): торс 0,0°, голова 0,3°,
+- Проверка `python tools/test_ik.py blender/basefile.blend` (синтетика 11 точек, все кадры): торс 0,0°, голова 0,3°,
   руки 0,1°, ноги 0,7° (макс 0,8°). 120 кадров за 3 с.
 
 ## Состояние модели и метрики
@@ -83,7 +88,7 @@ Head, Left/Right Arm/Leg; ведомый, напрямую не ключеват
   `orbis-alpha-2.pt` сломан багом (разметки сохранялись float16 0..255 → вход ×255; исправлено, есть защита в train.py).
   Дальше: дообучение от alpha-1 `--lr 0.0005 --steps 120000` (~2,7 ч) → alpha-3. Лог обучения — `<веса>.log`.
 - Импорт: `MAX_OFFSET = 1.0` (этап 2 «разумное расстояние»), `TURNS` (разворот корня на 180° по facing_frames,
-  проверено `tools/test_ik.py basefile.blend --turn`). Сеть по умолчанию с зеркальной проверкой (`predict_tta`).
+  проверено `tools/test_ik.py blender/basefile.blend --turn`). Сеть по умолчанию с зеркальной проверкой (`predict_tta`).
 - Веса `weights/stickpose.pt` (v1, w16, ~22 тыс. шагов на CPU, плато). У пользователя есть `stickpose_w32.pt`
   (v1, w32, 40 тыс. шагов на 3050, 0,085 с/шаг): голова 90,5%, шея 91,8%, таз 88,8%, кисти 81,4%, стопы 88,5%
   (w16 на той же синтетике: 88,5/90,5/87,5/76,2/87,0). Orbis v2 строится поверх w32 (8 ч на 3050).
@@ -136,7 +141,7 @@ Head, Left/Right Arm/Leg; ведомый, напрямую не ключеват
 ```
 pip install opencv-python numpy scipy scikit-image pillow torch   # torch с CUDA — с pytorch.org
 python orbis.py                                                    # меню Orbis в терминале (все действия)
-python stick2r6.py видео.mp4 --facing r,l                          # разметка → видео.r6.json
+python app/stick2r6.py видео.mp4 --facing r,l                          # разметка → видео.r6.json
 cd stickpose
 python train.py --resume ../weights/stickpose.pt --steps 20000 --out ../weights/stickpose.pt
 python train.py --resume ../weights/stickpose_w32.pt --steps 240000 --real ../weights/real --out ../weights/orbis.pt
@@ -144,7 +149,7 @@ python evaluate.py ../weights/stickpose.pt
 python overlay.py ../weights/stickpose.pt видео.mp4 out "x,y;x,y" [start end]
 python make_testvideo.py tv && python test_e2e2.py tv ../weights/stickpose.pt   # вопросов/точность
 ```
-Blender: Scripting → Open `blender_import_ikrig.py` → Run Script → выбрать `.r6.json`.
+Blender: Scripting → Open `blender/blender_import_ikrig.py` → Run Script → выбрать `.r6.json`.
 
 ## Грабли
 - Не загружать длинное видео целиком в память (929 кадров FullHD убили процесс обучения по OOM) — читать потоком.
