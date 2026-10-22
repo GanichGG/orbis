@@ -14,8 +14,8 @@
   - **Haiku** — механика: zip, пути, переименования, чтение логов.
 
 ## Что это
-Сеть и программа называются **Prismium** (раньше — Orbis; репозиторий на GitHub пока `orbis`).
-Цель к пятнице: **Prismium Epigram** — первая маленькая рабочая модель (v2 поверх w32 + ~1000–1500 реальных разметок, 15–25 кусков).
+Сеть (и весь проект) пользователь называет **Orbis**.
+Цель к пятнице: **Orbis Epigram** — первая маленькая рабочая модель (v2 поверх w32 + ~1000–1500 реальных разметок, 15–25 кусков).
 Программа: видео со стикмен-анимацией (стиль Stick Nodes) → R6-анимация в Blender → Roblox.
 Пользователь кликает пипеткой по персонажам, программа размечает суставы нейросетью, спрашивает
 только спорные кадры, дообучается на ответах, экспортирует `.r6.json`, импортёр ставит ключи в Blender.
@@ -29,7 +29,7 @@
   цветовые вспышки, одноцветные персонажи делятся по прошлой маске. ~0,4 с/кадр (можно ускорить: палитру раз в N кадров).
 - `stickpose/pipeline.py` — маски → кроп 128×128, 2 канала (свой силуэт, чужие силуэты) → модель → пики суставов
   в координатах кадра; толщина линии = масштаб; `finetune()` на разметках.
-- `stickpose/model.py` — StickPose (Prismium v2): U-Net, вход 4×128 (свой силуэт, чужие, свой в кадре f−1 и f+1 —
+- `stickpose/model.py` — StickPose (Orbis v2): U-Net, вход 4×128 (свой силуэт, чужие, свой в кадре f−1 и f+1 —
   сеть видит движение), выход 8 карт 64×64: head, neck, hip, hands, feet, elbows, knees (пары по 2 пика) + карта костей.
   Веса v1 (2→5) грузятся и работают; `upgrade()` делает из v1 модель v2 с теми же знаниями (train.py --resume сам).
 - **Правило переноса (от пользователя):** голова = голова, торс = таз→шея, **рука R6 = предплечье (локоть→кисть),
@@ -103,11 +103,11 @@ Head, Left/Right Arm/Leg; ведомый, напрямую не ключеват
 ## Команды
 ```
 pip install opencv-python numpy scipy scikit-image pillow torch customtkinter   # torch с CUDA — с pytorch.org
-python prismium.py                                                # окно Prismium (или Prismium.exe из build_exe.bat)
+python orbis_app.py                                                # окно Orbis (или Orbis.exe из build_exe.bat)
 python stick2r6.py видео.mp4 --facing r,l                          # разметка → видео.r6.json
 cd stickpose
 python train.py --resume ../weights/stickpose.pt --steps 20000 --out ../weights/stickpose.pt
-python train.py --resume ../weights/stickpose_w32.pt --steps 240000 --real ../weights/real --out ../weights/prismium.pt
+python train.py --resume ../weights/stickpose_w32.pt --steps 240000 --real ../weights/real --out ../weights/orbis.pt
 python evaluate.py ../weights/stickpose.pt
 python overlay.py ../weights/stickpose.pt видео.mp4 out "x,y;x,y" [start end]
 python make_testvideo.py tv && python test_e2e2.py tv ../weights/stickpose.pt   # вопросов/точность

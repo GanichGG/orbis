@@ -1,7 +1,7 @@
-"""Экзамен Prismium на настоящих кадрах: одна линейка для всех изменений.
+"""Экзамен Orbis на настоящих кадрах: одна линейка для всех изменений.
 
     python tools/exam.py make видео.mp4 [--n 30] [--start 0 --end 300]   # разметить экзаменационные кадры (один раз)
-    python tools/exam.py run weights/prismium.pt [weights/другие.pt ...]    # сдать экзамен (сравнить модели)
+    python tools/exam.py run weights/orbis.pt [weights/другие.pt ...]    # сдать экзамен (сравнить модели)
 
 make: пипетка (или клики из <видео>.s2r.json) -> N кадров равномерно по ролику -> окно разметки на каждого
 персонажа: точки расставлены сетью, проверьте и поправьте КАЖДУЮ из 11 (это эталон). S — пропустить кадр.
@@ -24,7 +24,7 @@ sys.path[:0] = [os.path.join(ROOT, "stickpose"), ROOT]
 import colorseg as CS          # noqa: E402
 import pipeline as PL          # noqa: E402
 import track2 as T             # noqa: E402
-from model import load, predict, peaks, device, default_weights  # noqa: E402
+from model import load, predict, peaks, device  # noqa: E402
 
 EXAM = os.path.join(ROOT, "weights", "exam")
 J = {j: i for i, j in enumerate(T.JOINTS)}
@@ -173,7 +173,7 @@ def main():
     m.add_argument("--n", type=int, default=30)
     m.add_argument("--start", type=int, default=0)
     m.add_argument("--end", type=int, default=None)
-    m.add_argument("--weights", default=default_weights(ROOT))
+    m.add_argument("--weights", default=os.path.join(ROOT, "weights", "orbis.pt"))
     r = sub.add_parser("run")
     r.add_argument("weights", nargs="+")
     a = ap.parse_args()

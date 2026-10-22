@@ -1,8 +1,6 @@
-"""Модель StickPose (Prismium): силуэты (4 канала, 128x128: свой, чужие, свой в прошлом и следующем кадре)
+"""Модель StickPose (Orbis): силуэты (4 канала, 128x128: свой, чужие, свой в прошлом и следующем кадре)
 -> 5 карт вероятности (64x64): голова, шея, таз, кисти, стопы + 6-я карта «скелет тела» (вспомогательная).
 Небольшая U-Net, работает и на CPU, и на видеокарте. Веса v1 (2 канала -> 5 карт) тоже загружаются."""
-import os
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -80,15 +78,6 @@ def upgrade(old, cin=CIN, cout=NOUT):
             t[:v.shape[0]] = v
     m.load_state_dict(sd)
     return m.train(old.training)
-
-
-def default_weights(root):
-    """Веса по умолчанию: prismium.pt, иначе orbis.pt (старое имя), иначе stickpose.pt."""
-    for n in ("prismium.pt", "orbis.pt", "stickpose.pt"):
-        p = os.path.join(root, "weights", n)
-        if os.path.exists(p):
-            return p
-    return os.path.join(root, "weights", "prismium.pt")
 
 
 def device():

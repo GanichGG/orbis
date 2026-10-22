@@ -27,7 +27,7 @@ KEEP = re.compile(r"fight|punch|kick|box|martial|karate|kung|taekwondo|judo|swor
                   r"wash|sweep|shoot|basketball|soccer|golf|baseball|tennis|motorcycle|mop|chicken|monkey|bear|"
                   r"animal|elephant|frog|march|skip|zombie|drunk|sneak|tiptoe|range of motion|salsa|charleston|"
                   r"indian|walk", re.I)
-# точки для стикмена: 11 суставов Prismium + грудь (изгиб торса) + плечевые и тазобедренные суставы (направления звеньев)
+# точки для стикмена: 11 суставов Orbis + грудь (изгиб торса) + плечевые и тазобедренные суставы (направления звеньев)
 MJ = ["head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot", "l_elbow", "r_elbow", "l_knee", "r_knee",
       "chest", "l_sh", "r_sh", "l_hipj", "r_hipj"]
 SRC = {"neck": "Neck", "hip": "Hips", "l_hand": "LeftHand", "r_hand": "RightHand", "l_foot": "LeftFoot",

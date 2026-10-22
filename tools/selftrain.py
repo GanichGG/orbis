@@ -1,7 +1,7 @@
-"""Самообучение Prismium: прогон по роликам без разметки -> «уверенные» кадры -> weights/pseudo/*.npz для train.py --pseudo.
+"""Самообучение Orbis: прогон по роликам без разметки -> «уверенные» кадры -> weights/pseudo/*.npz для train.py --pseudo.
 
-    python tools/selftrain.py --weights weights/prismium.pt видео1.mp4 видео2.mov ...
-    python tools/selftrain.py --weights weights/prismium.pt папка_с_роликами/
+    python tools/selftrain.py --weights weights/orbis.pt видео1.mp4 видео2.mov ...
+    python tools/selftrain.py --weights weights/orbis.pt папка_с_роликами/
 
 Персонажи берутся из <видео>.s2r.json (если ролик уже открывали в stick2r6.py — там клики и разметки),
 иначе открывается окно пипетки (кликнуть персонажей, Enter). Кадр попадает в обучение, только если:
@@ -23,7 +23,7 @@ import colorseg as CS          # noqa: E402
 import pipeline as PL          # noqa: E402
 import track2 as T             # noqa: E402
 import stick2r6 as APP         # noqa: E402
-from model import load, device, predict, peaks, default_weights  # noqa: E402
+from model import load, device, predict, peaks  # noqa: E402
 
 EXT = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v")
 CH_OF = {"head": "head", "neck": "neck", "hip": "hip", "l_hand": "hands", "r_hand": "hands", "l_foot": "feet",
@@ -92,7 +92,7 @@ def pick(video_path, video):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("videos", nargs="+")
-    ap.add_argument("--weights", default=default_weights(ROOT))
+    ap.add_argument("--weights", default=os.path.join(ROOT, "weights", "orbis.pt"))
     ap.add_argument("--out", default=os.path.join(ROOT, "weights", "pseudo"))
     a = ap.parse_args()
     files = []
@@ -138,8 +138,8 @@ def main():
             name = os.path.splitext(os.path.basename(path))[0]
             np.savez_compressed(os.path.join(a.out, name + ".npz"), x=np.stack(X), kp=np.stack(K))
             total += len(X)
-    print(f"Готово: {total} кадров в {a.out}. Дальше: cd stickpose && python train.py --resume ../weights/prismium.pt "
-          f"--steps 60000 --real ../weights/real --pseudo ../weights/pseudo --out ../weights/prismium.pt")
+    print(f"Готово: {total} кадров в {a.out}. Дальше: cd stickpose && python train.py --resume ../weights/orbis.pt "
+          f"--steps 60000 --real ../weights/real --pseudo ../weights/pseudo --out ../weights/orbis.pt")
 
 
 if __name__ == "__main__":
