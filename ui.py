@@ -151,7 +151,7 @@ def pick_colors(get_frame, n_frames, segment_preview, sample, start=0):
     f = start
     chars = [[]]          # по персонажам: список (x, y)
     view = View(get_frame(f).shape)
-    st = {"click": None, "dirty": True, "confirm": False}
+    st = {"click": None, "dirty": True}
 
     def on_mouse(ev, x, y, *_):
         if ev == cv2.EVENT_LBUTTONDOWN and y > PANEL:
@@ -188,10 +188,7 @@ def pick_colors(get_frame, n_frames, segment_preview, sample, start=0):
                  (255, 255, 255)),
                 ("N — следующий персонаж,  Backspace — убрать последний клик,  A/D — другой кадр (проверить выделение),  Enter — готово",
                  (190, 190, 190)),
-                ("ВЫБРАН 1 ПЕРСОНАЖ. Enter — продолжить так,  N — добавить ещё" if st["confirm"] else
-                 "Выбрано: " + (",  ".join(f"персонаж {i + 1} — кликов {len(c)}" for i, c in enumerate(chars) if c) or "никого")
-                 + ".  Заливка = что программа считает персонажем.  Esc — выход.",
-                 (120, 200, 255) if st["confirm"] else (190, 190, 190)),
+                (f"Персонажей: {len(active)}.  Цветная заливка = что программа считает персонажем.  Esc — выход.", (190, 190, 190)),
             ])
             cv2.imshow(WIN, img)
             st["dirty"] = False
@@ -207,7 +204,6 @@ def pick_colors(get_frame, n_frames, segment_preview, sample, start=0):
             f = min(n_frames - 1, f + 1)
         elif k == "n" and chars[-1]:
             chars.append([])
-            st["confirm"] = False
         elif k == "back":
             if chars[-1]:
                 chars[-1].pop()
@@ -215,9 +211,6 @@ def pick_colors(get_frame, n_frames, segment_preview, sample, start=0):
                 chars.pop()
         elif k == "enter":
             active = [c for c in chars if c]
-            if len(active) == 1 and not st["confirm"]:   # частая ошибка: второго персонажа не выбрали
-                st["confirm"] = True
-                continue
             if active:
                 pts = [next(((p[0], p[1]) for p in reversed(c) if p[2] == f), None) for c in active]
                 return f, [[p[3].tolist() for p in c] for c in active], pts
