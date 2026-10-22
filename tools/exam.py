@@ -160,7 +160,9 @@ def run(a):
                 for k, v in p.items():
                     pts.setdefault(k, []).append(v)
         allp = np.concatenate([np.ravel(v) for v in parts.values()])
-        print(f"\n{os.path.basename(w)}:  СРЕДНЯЯ ОШИБКА {allp.mean():.1f}°, частей точнее 15°: {(allp < 15).mean() * 100:.0f}%")
+        score = max(0.0, min(10.0, 10 * (30 - allp.mean()) / 27))   # 3° -> 10, 10° -> 7.4, 30° -> 0
+        print(f"\n{os.path.basename(w)}:  ОЦЕНКА {score:.1f}/10   (средняя ошибка {allp.mean():.1f}°, "
+              f"частей точнее 15°: {(allp < 15).mean() * 100:.0f}%; Epigram — от 7)")
         print("  части R6: " + ",  ".join(f"{k} {np.mean(v):.1f}°" for k, v in parts.items()))
         print("  точки ближе 10% торса: " + ",  ".join(f"{k} {(np.array(v) < 0.1).mean() * 100:.0f}%" for k, v in pts.items()))
 
