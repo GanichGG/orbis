@@ -325,7 +325,7 @@ def main():
         samples = sum((PL.labels_to_samples(inputs[k], labels[k]) for k in range(nc)), [])
         if samples:
             np.savez_compressed(os.path.join(HERE, "weights", "real", os.path.basename(base) + ".npz"),
-                                x=np.stack([s[0] for s in samples]).astype(np.float16),
+                                x=np.stack([s[0] for s in samples]).astype(np.uint8),
                                 kp=np.stack([s[1] for s in samples]))
     except Exception as e:
         log(f"(не удалось сохранить датасет: {e})")

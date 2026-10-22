@@ -44,7 +44,7 @@ def augment_real(rng, x, kp):
     """Лёгкая аугментация реального примера: поворот/масштаб/сдвиг/зеркало."""
     import cv2
     x = fit_channels(np.asarray(x), synth.CIN)
-    x = x.astype(np.float32) / (255.0 if x.dtype == np.uint8 else 1.0)
+    x = x.astype(np.float32) / (255.0 if x.dtype == np.uint8 or x.max() > 1.5 else 1.0)
     a = rng.normal(0, 12)
     s = rng.uniform(0.85, 1.15)
     M = cv2.getRotationMatrix2D((synth.S / 2, synth.S / 2), a, s)
@@ -117,7 +117,10 @@ def load_real(d):
         for fn in sorted(os.listdir(d)):
             if fn.endswith(".npz"):
                 z = np.load(os.path.join(d, fn))
-                x = z["x"] if z["x"].dtype == np.uint8 else z["x"].astype(np.float32)
+                x = z["x"]
+                if x.dtype != np.uint8:  # дробные: старые файлы 0..1 или (баг) 0..255 — приводим к uint8 0..255
+                    x = x.astype(np.float32)
+                    x = np.clip(x if x.max() > 1.5 else x * 255, 0, 255).round().astype(np.uint8)
                 kp = z["kp"].astype(np.float32)
                 if kp.shape[1] == 7:  # старые разметки: локти/колени — середины рук/ног
                     mid = lambda a, b: (kp[:, a] + kp[:, b]) / 2
