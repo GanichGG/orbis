@@ -17,3 +17,4 @@ build/
 weights/orbis*.pt
 weights/test*.pt
 orbis.json
+weights/*.log

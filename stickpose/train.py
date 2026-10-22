@@ -104,6 +104,9 @@ def train(model, steps, lr=2e-3, bs=32, real=None, real_frac=0.0, log_every=200,
         if step % log_every == 0 or step == steps:
             msg = f"шаг {step}/{steps}  loss {run:.4f}  {(time.time() - t0) / (step - first + 1):.2f} с/шаг"
             (on_log or print)(msg)
+            if ckpt:  # лог рядом с весами: <веса>.log
+                with open(os.path.splitext(ckpt)[0] + ".log", "a", encoding="utf-8") as fh:
+                    fh.write(msg + "\n")
             if ckpt and step < steps:
                 save(model, ckpt, {"steps": step, "total": steps, "lr": lr, "bs": bs,
                                    "opt": opt.state_dict(), "sched": sched.state_dict()})
