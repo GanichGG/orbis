@@ -44,10 +44,42 @@ def background(rng):
     return np.clip(bg + noise, 0, 255).astype(np.uint8)
 
 
-def main(out_prefix, n=120, seed=7):
+def sf2_track(rng, n, T, x0):
+    """Боец из анимаций Shadow Fight 2: случайные приёмы подряд, вид точно сбоку, постоянные пропорции и стиль."""
+    src = synth.mocap()["sf2"]
+    base = synth.MocapFigure.__new__(synth.MocapFigure)
+    proto = synth.MocapFigure(rng, T, np.array([x0, 0.0]))
+    while proto.source != "sf2":
+        proto = synth.MocapFigure(rng, T, np.array([x0, 0.0]))
+    side = 1 if rng.random() < 0.5 else -1
+    c, s_ = 0.0, float(side)   # yaw ±90°: ось «вперёд» SF2 -> экран
+    proto.R = np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1]])
+    out, hipx = [], x0
+    while len(out) < n:
+        i = int(rng.integers(len(src["start"])))
+        f = base
+        f.__dict__.update(proto.__dict__)
+        f.M, f.s0, f.n = src, int(src["start"][i]), int(src["length"][i])
+        P0 = src["pos"][f.s0:f.s0 + f.n]
+        J = src["J"]
+        f.torso3 = float(np.median(np.linalg.norm(P0[:, J["neck"]] - P0[:, J["hip"]], axis=1))) + 1e-6
+        f.t, f.root0 = 0.0, f._root(0.0)
+        f.hip = np.array([hipx, 0.0])
+        for o in range(f.n):
+            pts, segs = f(o)
+            out.append((pts, segs))
+        hipx = out[-1][0]["hip"][0]
+        if abs(hipx - x0) > 200:   # не уходить за кадр: следующий приём — снова с места старта
+            hipx = x0
+    return out[:n], proto
+
+
+def main(out_prefix, n=120, seed=7, source="random"):
     rng = np.random.default_rng(seed)
     bg = background(rng)
     chars = []
+    if source == "sf2":
+        tracks = [sf2_track(rng, n, 70.0, [380.0, 620.0][ci] + W / 2) for ci in range(2)]
     for ci in range(2):
         kp = keyposes(rng, n // 10 + 2)
         st = synth.sample_style(rng)
@@ -68,12 +100,16 @@ def main(out_prefix, n=120, seed=7):
         z, cx, cy = cams[f]
         world = bg.copy()
         for ci, ch in enumerate(chars):
-            seg, t = divmod(f, 10)
-            p = interp(ch["kp"][seg], ch["kp"][seg + 1], ease(t / 10))
-            p["torso"] = math.pi + 0.6 * math.sin(f / 9 + ci)  # больше «стоячих» поз
             T = 70.0
-            hip = np.array([ch["x0"] + ch["vx"] * f + W / 2, H * 1.1 + 20 + rng.normal(0, 0.5)])
-            pts, segs = synth.forward(p, hip, T)
+            if source == "sf2":   # анимация SF2: таз из записи, земля — по стопам
+                pts, segs = tracks[ci][0][f]
+                pts = {k: (v + np.array([0.0, H * 1.1 + 20]) if k != "head_dir" else v) for k, v in pts.items()}
+            else:
+                seg, t = divmod(f, 10)
+                p = interp(ch["kp"][seg], ch["kp"][seg + 1], ease(t / 10))
+                p["torso"] = math.pi + 0.6 * math.sin(f / 9 + ci)  # больше «стоячих» поз
+                hip = np.array([ch["x0"] + ch["vx"] * f + W / 2, H * 1.1 + 20 + rng.normal(0, 0.5)])
+                pts, segs = synth.forward(p, hip, T)
             m = np.zeros((H * 2 * synth.SS, W * 2 * synth.SS), np.uint8)
             head = synth.render(m, pts, segs, T, ch["style"])
             m = cv2.resize(m, (W * 2, H * 2), interpolation=cv2.INTER_AREA)
@@ -91,4 +127,4 @@ def main(out_prefix, n=120, seed=7):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], source="sf2" if "--sf2" in sys.argv else "random")

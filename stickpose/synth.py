@@ -147,6 +147,14 @@ def render(canvas, pts, segs, T, style, val=255, ss=SS):
 
 
 def sample_style(rng):
+    if rng.random() < 0.12:  # «объёмный силуэт» (как бойцы Shadow Fight): толстые конечности, широкий торс
+        return {"thick": rng.uniform(0.3, 0.48), "head": rng.uniform(0.26, 0.38), "head_gap": rng.uniform(0.7, 0.95),
+                "round": True, "ring": False, "neck_line": rng.random() < 0.5, "taper": rng.uniform(0.6, 0.9),
+                "torso_w": rng.uniform(1.2, 1.8), "fist": rng.uniform(0.7, 1.0) if rng.random() < 0.5 else 0.0,
+                "boot": rng.uniform(0.7, 1.0) if rng.random() < 0.5 else 0.0,
+                "prop": {"hand": "l" if rng.random() < 0.5 else "r", "len": rng.uniform(0.6, 1.8), "ang": rng.normal(0, 0.4),
+                         "back": rng.uniform(0, 0.4), "thick": rng.uniform(0.2, 0.5)} if rng.random() < 0.3 else None,
+                "hair": None}
     return {
         "thick": rng.uniform(0.07, 0.3),
         "head": rng.uniform(0.18, 0.38),
@@ -177,22 +185,30 @@ def _keypoints(pts, head):
                      pts["l_arm_e"], pts["r_arm_e"], pts["l_leg_k"], pts["r_leg_k"]], float)
 
 
-MOCAP_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "weights", "mocap.npz")
-MOCAP_FRAC = 0.65   # доля примеров с позой/движением из записей людей (остальное — случайные позы, в т.ч. «дикие»)
+_W = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "weights")
+MOCAP_PATH = os.path.join(_W, "mocap.npz")   # движения людей (CMU, tools/fetch_mocap.py)
+SF2_PATH = os.path.join(_W, "sf2.npz")       # боевые анимации Shadow Fight 2 (tools/fetch_sf2.py), если есть
+MOCAP_FRAC = 0.65   # доля примеров с позой/движением из записей (остальное — случайные позы, в т.ч. «дикие»)
+SF2_FRAC = 0.4      # из примеров с записями — доля боевых анимаций SF2 (если файл есть)
 _MOCAP = None
 
 
+def _load_motion(path, min_len):
+    z = np.load(path)
+    ok = z["length"] >= min_len
+    return {"pos": z["pos"].astype(np.float32), "root": z["root"].astype(np.float32), "start": z["start"][ok],
+            "length": z["length"][ok], "J": {j: i for i, j in enumerate(z["joints"])}}
+
+
 def mocap():
-    """Записи движений (tools/fetch_mocap.py) или None. Грузится один раз на процесс."""
+    """Источники движений: {"cmu": ..., "sf2": ...} (что есть) или None. Грузятся один раз на процесс."""
     global _MOCAP
     if _MOCAP is None:
-        _MOCAP = False
+        _MOCAP = {}
         if os.path.exists(MOCAP_PATH):
-            z = np.load(MOCAP_PATH)
-            J = list(z["joints"])
-            ok = z["length"] >= 16
-            _MOCAP = {"pos": z["pos"].astype(np.float32), "root": z["root"].astype(np.float32),
-                      "start": z["start"][ok], "length": z["length"][ok], "J": {j: i for i, j in enumerate(J)}}
+            _MOCAP["cmu"] = _load_motion(MOCAP_PATH, 16)
+        if os.path.exists(SF2_PATH):
+            _MOCAP["sf2"] = _load_motion(SF2_PATH, 8)
     return _MOCAP or None
 
 
@@ -201,7 +217,10 @@ class MocapFigure:
     укорочения в перспективе сохраняются. fig(o) — поза через o кадров (30 fps, можно дробно) -> (pts, segs)."""
 
     def __init__(self, rng, T, hip):
-        M = mocap()
+        src = mocap()
+        key = "sf2" if "sf2" in src and ("cmu" not in src or rng.random() < SF2_FRAC) else "cmu"
+        M = src[key]
+        self.source = key
         self.M, self.T, self.hip = M, T, np.asarray(hip, float)
         i = int(rng.integers(len(M["start"])))
         self.step = float(rng.choice([0.5, 1, 1, 1, 2, 3], ))

@@ -86,4 +86,4 @@ for ci in range(nc):
     ang = np.stack(ang, 1)
     print(f"перс {ci + 1}: ошибка точки ср {e.mean() * 100:.0f}% p95 {np.percentile(e, 95) * 100:.0f}% торса; "
           f"угол R6 ср {ang.mean():.1f}° p95 {np.percentile(ang, 95):.1f}°; кадров с ошибкой >30°: {(ang.max(1) > 30).sum()}"
-          f"; размечено {len(res[ci]['anchors'])}/{n}")
+          f"; размечено {len(res[ci]['anchors'])}/{n}; ОЦЕНКА ПОЗ {max(0, min(10, 10 * (30 - ang.mean()) / 27)):.1f}/10")

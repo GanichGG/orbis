@@ -18,3 +18,4 @@ weights/orbis*.pt
 weights/test*.pt
 orbis.json
 weights/*.log
+weights/sf2.npz
