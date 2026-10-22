@@ -34,7 +34,12 @@ def build_inputs(masks_per_frame, n_chars):
     import cv2
     n, S = len(masks_per_frame), synth.S
     out = [[None] * n for _ in range(n_chars)]
-    for f, ms in enumerate(masks_per_frame):
+    unp = lambda f: [CS.unpack(m) for m in masks_per_frame[f]] if masks_per_frame[f] is not None else None
+    cur = unp(0) if n else None
+    nxt = unp(1) if n > 1 else None
+    prev = None
+    for f in range(n):
+        ms = cur
         for c in range(n_chars):
             other = np.zeros_like(ms[c])
             for k in range(n_chars):
@@ -44,13 +49,14 @@ def build_inputs(masks_per_frame, n_chars):
             if x is None:
                 continue
             ch = [np.round(x * 255).astype(np.uint8)]
-            for g in (f - 1, f + 1):
-                if 0 <= g < n and masks_per_frame[g] is not None:
-                    ch.append(cv2.warpAffine(masks_per_frame[g][c].astype(np.uint8) * 255, M, (S, S),
-                                             flags=cv2.INTER_AREA)[None])
+            for nb in (prev, nxt):
+                if nb is not None:
+                    ch.append(cv2.warpAffine(nb[c].astype(np.uint8) * 255, M, (S, S), flags=cv2.INTER_AREA)[None])
                 else:
                     ch.append(np.zeros((1, S, S), np.uint8))
             out[c][f] = (np.concatenate(ch), M, line_thickness(ms[c]))
+        prev, cur = cur, nxt
+        nxt = unp(f + 2) if f + 2 < n else None
     return out
 
 

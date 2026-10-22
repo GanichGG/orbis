@@ -30,8 +30,10 @@ def min_dist(lab, centers):
 
 
 class ColorSegmenter:
-    def __init__(self, colors, max_dist=38.0, k_bg=10):
-        """colors: список (по персонажам) списков Lab-цветов."""
+    def __init__(self, colors, max_dist=38.0, k_bg=10, exclude=None):
+        """colors: список (по персонажам) списков Lab-цветов. exclude — маска неподвижных областей
+        того же цвета (интерфейс игры, земля): там персонажей не ищем (см. static_mask)."""
+        self.exclude = exclude
         self.colors = [np.array(c, np.float32).reshape(-1, 3) for c in colors]
         self.base = [c.copy() for c in self.colors]
         self.n = len(self.colors)
@@ -78,6 +80,8 @@ class ColorSegmenter:
         masks = []
         for i in range(self.n):
             m = (dc[i] < self.max_dist) & (dc[i] < 0.8 * db)
+            if self.exclude is not None and self.exclude.shape == m.shape:
+                m &= ~self.exclude
             m = cv2.morphologyEx(m.astype(np.uint8), cv2.MORPH_OPEN, np.ones((2, 2), np.uint8)) > 0
             masks.append(m)
         # близнецы по цвету: делим пиксели по близости к прошлым маскам
@@ -130,6 +134,35 @@ class ColorSegmenter:
                 if np.min(np.linalg.norm(self.base[i] - med, axis=1)) < 30:
                     self.colors[i] = np.vstack([self.base[i], med[None]])
         return out
+
+
+def pack(masks):
+    """Маски кадра -> сжатые в 8 раз (длинные ролики не съедают память)."""
+    return [(np.packbits(m), m.shape) for m in masks]
+
+
+def unpack(m):
+    if isinstance(m, tuple):
+        bits, shape = m
+        return np.unpackbits(bits, count=shape[0] * shape[1]).reshape(shape).astype(bool)
+    return m
+
+
+def static_mask(get, n, colors, samples=40, thr=0.8, max_dist=38.0):
+    """Неподвижные области цвета персонажей (интерфейс игры: джойстик, кнопки, портреты; тёмная земля):
+    пиксель похож по цвету на персонажа в ≥ thr выборочных кадров. Бойцы двигаются — их это не задевает.
+    -> маска bool или None (если таких областей почти нет)."""
+    seg = ColorSegmenter(colors, max_dist=max_dist)
+    idx = np.unique(np.linspace(0, n - 1, min(samples, n)).round().astype(int))
+    acc = None
+    for f in idx:   # «похоже на персонажа» с учётом фона — как в самой пипетке (тёмное небо и т.п. не считаются)
+        dc, db = seg.dists(get(int(f)))
+        hit = ((dc < max_dist) & (dc < 0.8 * db)).any(0)
+        acc = hit.astype(np.float32) if acc is None else acc + hit
+    st = (acc / len(idx)) >= thr
+    st = cv2.morphologyEx(st.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    st = cv2.dilate(st, np.ones((5, 5), np.uint8)) > 0
+    return st if st.mean() > 0.002 and len(idx) >= 8 else None
 
 
 def crop_input(mask_self, mask_other, S=128, margin=1.25, box=None):

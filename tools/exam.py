@@ -46,12 +46,13 @@ def make(a):
         if colors is None:
             return
     nc = len(colors)
+    static = CS.static_mask(lambda i: video[i], n, colors)   # интерфейс игры, земля
     masks = [None] * n
     for d in (1, -1):
-        seg = CS.ColorSegmenter(colors)
-        masks[ref] = seg.step(video[ref], init_points=pts)
+        seg = CS.ColorSegmenter(colors, exclude=static)
+        masks[ref] = CS.pack(seg.step(video[ref], init_points=pts))
         for f in (range(ref + 1, n) if d > 0 else range(ref - 1, -1, -1)):
-            masks[f] = seg.step(video[f])
+            masks[f] = CS.pack(seg.step(video[f]))
     inputs = PL.build_inputs(masks, nc)
     del masks
     model = load(a.weights, device()) if os.path.exists(a.weights) else None

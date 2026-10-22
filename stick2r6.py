@@ -179,14 +179,18 @@ def main():
 
     # ---- выделение персонажей во всех кадрах ----
     ui.busy("Выделяю персонажей... (прогресс в консоли)")
+    # неподвижные области цвета персонажей (интерфейс игры, тёмная земля) — не персонажи
+    static = CS.static_mask(lambda i: video[i], n, proj["colors"])
+    if static is not None:
+        log(f"Убраны неподвижные области того же цвета (интерфейс, земля): {static.mean() * 100:.0f}% кадра")
     masks = [None] * n
     for direction in (+1, -1):
-        seg = CS.ColorSegmenter(proj["colors"])
-        masks[proj["ref"]] = seg.step(video[proj["ref"]], init_points=proj["points"])
+        seg = CS.ColorSegmenter(proj["colors"], exclude=static)
+        masks[proj["ref"]] = CS.pack(seg.step(video[proj["ref"]], init_points=proj["points"]))
         rng = range(proj["ref"] + 1, n) if direction > 0 else range(proj["ref"] - 1, -1, -1)
         t0 = time.time()
         for f in rng:
-            masks[f] = seg.step(video[f])
+            masks[f] = CS.pack(seg.step(video[f]))
             if time.time() - t0 > 1:
                 log(f"  кадр {f + 1}/{n}", same_line=True)
                 t0 = time.time()
