@@ -3,6 +3,7 @@
 ## Пользователь и правила общения
 - Гани, разработчик под Roblox/Minecraft, студия Manifest Entertainment. **Общаться только по-русски.**
 - **Git/GitHub только от GanichGG <gan1cha@mail.ru>** (`git config user.name GanichGG`, `user.email gan1cha@mail.ru`).
+- **В коммитах без `Co-Authored-By` и без ссылок на Claude/сессию** — автор только GanichGG.
 - **Работать сразу в `main`, без веток.** Коммиты маленькие, по смыслу, каждый отдельным пушем (пользователю важна активность на GitHub).
 - ПК: Windows, Ryzen 5 5600, **RTX 3050**, 16 ГБ ОЗУ. Blender **5.2.2 LTS**.
 - **Экономить его лимит Claude** (недельный лимит, просил прямо):
