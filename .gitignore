@@ -21,4 +21,9 @@ weights/*.log
 weights/sf2.npz
 videos/
 *.zip
-orbis_app.json
+.claude/
+.vscode/
+.idea/
+*.log
+Thumbs.db
+.DS_Store
