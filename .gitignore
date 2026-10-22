@@ -16,3 +16,4 @@ Orbis.exe
 build/
 weights/orbis*.pt
 weights/test*.pt
+orbis.json

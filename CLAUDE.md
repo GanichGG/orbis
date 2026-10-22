@@ -102,8 +102,8 @@ Head, Left/Right Arm/Leg; ведомый, напрямую не ключеват
 
 ## Команды
 ```
-pip install opencv-python numpy scipy scikit-image pillow torch customtkinter   # torch с CUDA — с pytorch.org
-python orbis_app.py                                                # окно Orbis (или Orbis.exe из build_exe.bat)
+pip install opencv-python numpy scipy scikit-image pillow torch   # torch с CUDA — с pytorch.org
+python orbis.py                                                    # меню Orbis в терминале (все действия)
 python stick2r6.py видео.mp4 --facing r,l                          # разметка → видео.r6.json
 cd stickpose
 python train.py --resume ../weights/stickpose.pt --steps 20000 --out ../weights/stickpose.pt
