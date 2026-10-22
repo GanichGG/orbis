@@ -95,7 +95,13 @@ def train(model, steps, lr=2e-3, bs=32, real=None, real_frac=0.0, log_every=200,
         x, y = next(it)
         x, y = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True)
         x, y = x[:, :model.cfg["cin"]], y[:, :model.cfg["cout"]]   # модель v1 (дообучение в программе) берёт меньше
+        if step == first and (x.max() > 1.01 or x.min() < -0.01):  # защита: вход сети должен быть 0..1
+            raise RuntimeError(f"вход сети вне 0..1 ({float(x.min()):.1f}..{float(x.max()):.1f}) — данные испорчены, "
+                               "обучение остановлено, веса не тронуты")
         loss = loss_fn(model(x), y)
+        if not torch.isfinite(loss):  # защита: веса не портим, последние сохранённые остаются
+            raise RuntimeError(f"loss = {float(loss)} на шаге {step} — обучение остановлено; "
+                               f"последние целые веса — в {ckpt or 'памяти не сохранены'}")
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
@@ -129,6 +135,12 @@ def load_real(d):
                     mid = lambda a, b: (kp[:, a] + kp[:, b]) / 2
                     kp = np.concatenate([kp, np.stack([mid(1, 3), mid(1, 4), mid(2, 5), mid(2, 6)], 1)], 1)
                 out += list(zip(x, kp))
+    if out:  # защита: битые примеры (вне кадра, не числа) не берём
+        S = synth.S
+        good = [(x, k) for x, k in out if np.isfinite(k).any() and np.nanmax(np.abs(k)) < 3 * S]
+        if len(good) < len(out):
+            print(f"  {d}: пропущено битых примеров {len(out) - len(good)}")
+        out = good
     return out or None
 
 

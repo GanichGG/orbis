@@ -6,7 +6,7 @@ from skimage.morphology import skeletonize
 
 import colorseg as CS
 import synth
-from model import predict, peaks
+from model import predict, predict_tta, peaks
 
 CHANNELS = synth.CH   # у моделей v1 только первые 5 (без локтей и колен)
 FEAT = 24
@@ -54,14 +54,14 @@ def build_inputs(masks_per_frame, n_chars):
     return out
 
 
-def run_model(model, inputs, bs=64):
-    """inputs (по одному персонажу) -> frames_c для трекера."""
+def run_model(model, inputs, bs=64, tta=True):
+    """inputs (по одному персонажу) -> frames_c для трекера. tta — ещё и зеркальный кадр, среднее."""
     idx = [f for f, v in enumerate(inputs) if v is not None]
     res = [None] * len(inputs)
     for i in range(0, len(idx), bs):
         chunk = idx[i:i + bs]
         X = np.stack([inputs[f][0] for f in chunk])
-        H = predict(model, X)
+        H = predict_tta(model, X) if tta else predict(model, X)
         for f, hm in zip(chunk, H):
             x, M, th = inputs[f]
             pk = {}

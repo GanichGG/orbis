@@ -6,13 +6,13 @@ import cv2
 import numpy as np
 
 import synth
-from model import load, predict, peaks
+from model import load, predict, predict_tta, peaks
 
 
-def synth_eval(model, n=400, seed=12345):
+def synth_eval(model, n=400, seed=12345, tta=False):
     rng = np.random.default_rng(seed)
     X, K, _ = zip(*[synth.make_sample(rng) for _ in range(n)])
-    H = predict(model, np.stack(X))
+    H = (predict_tta if tta else predict)(model, np.stack(X))
     res = {}
     for ch, (name, ids) in enumerate(zip(synth.CH, synth.GROUPS)):
         if ch >= H.shape[1]:  # модель v1 — без локтей и колен
@@ -30,7 +30,7 @@ def synth_eval(model, n=400, seed=12345):
 
 if __name__ == "__main__":
     m = load(sys.argv[1])
-    r = synth_eval(m)
+    r = synth_eval(m, tta="--tta" in sys.argv)
     print("синтетика (доля точек ближе 5% / 10% кропа, медиана ошибки):")
     for k, (a, b, med) in r.items():
         print(f"  {k:6s} {a * 100:5.1f}% {b * 100:5.1f}%  медиана {med * 100:.1f}%")

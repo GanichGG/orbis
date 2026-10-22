@@ -18,7 +18,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "stickpose"))
 
 
-def make_json(path, n=120, seed=3):
+def make_json(path, n=120, seed=3, turn=False):
     import synth
     sys.path.insert(0, os.path.join(ROOT, "stickpose"))
     from make_testvideo import interp, ease
@@ -30,18 +30,24 @@ def make_json(path, n=120, seed=3):
         p = interp(keys[seg], keys[seg + 1], ease(t / 10))
         pts, segs = synth.forward(p, np.array([480.0 + f, 300.0]), 70.0)
         head = pts["neck"] + synth._dir(pts["head_dir"]) * 20
-        frames.append(synth._keypoints(pts, head).round(2).tolist())
+        kp = synth._keypoints(pts, head)
+        if turn and f >= n // 2:  # разворот: та же поза, но смотрит в другую сторону
+            kp[:, 0] = 2 * kp[2, 0] - kp[:, 0]
+        frames.append(kp.round(2).tolist())
     data = {"format": "stick2r6", "version": 2, "fps": 30, "view": "side", "start": 0, "frame_size": [960, 540],
             "characters": [{"name": "Char1", "facing": "r", "frames": frames, "cuts": [], "labeled": [],
+                            "facing_frames": [(-1 if turn and f >= n // 2 else 1) for f in range(n)],
                             "joints": ["head", "neck", "hip", "l_hand", "r_hand", "l_foot", "r_foot",
                                        "l_elbow", "r_elbow", "l_knee", "r_knee"]}]}
     json.dump(data, open(path, "w"))
 
 
-blend = sys.argv[1]
-jpath = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(blend)), "_ik_test.r6.json")
-if len(sys.argv) <= 2:
-    make_json(jpath)
+TURN = "--turn" in sys.argv
+argv = [a for a in sys.argv if a != "--turn"]
+blend = argv[1]
+jpath = argv[2] if len(argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(blend)), "_ik_test.r6.json")
+if len(argv) <= 2:
+    make_json(jpath, turn=TURN)
 bpy.ops.wm.open_mainfile(filepath=blend)
 P = bpy.data.objects["__PrimaryArmature"]
 I = bpy.data.objects["InternalArmature"]
@@ -85,6 +91,14 @@ for f in range(len(F)):
         v = (F[f, Jn[j]] - F[f, Jn["hip"]]) * sc
         tw = hipw + W @ Vector((0, sg * v[0], -v[1]))
         dist.setdefault(part, []).append(math.hypot(endw.y - tw.y, endw.z - tw.z))
+    if TURN:  # куда смотрит корпус R6 (ось «вперёд» торса в мире)
+        tb = I.data.bones["Torso"]
+        fw = Iw @ (e.pose.bones["Torso"].matrix @ tb.matrix_local.inverted()).to_3x3() @ Iw.inverted() @ Vector((0, -1, 0))
+        dist.setdefault("_yaw", []).append(1 if fw.y > 0 else -1)
+yaw = dist.pop("_yaw", None)
+if yaw:
+    h = len(yaw) // 2
+    print(f"корпус смотрит вперёд: до разворота {sum(y > 0 for y in yaw[:h])}/{h}, после {sum(y > 0 for y in yaw[h:])}/{len(yaw) - h}")
 for k, v in dist.items():
     print(f"{k:10s} конец блока от кисти/стопы: ср {np.mean(v):.2f}  макс {np.max(v):.2f} шп.")
 for k, v in err.items():

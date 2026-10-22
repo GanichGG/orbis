@@ -96,6 +96,14 @@ def predict(model, x, dev=None):
     return torch.sigmoid(model(t)).cpu().numpy()
 
 
+def predict_tta(model, x, dev=None):
+    """predict + то же на зеркальном кадре (отражённое обратно), среднее: точнее и меньше дрожания.
+    Лево/право сеть не различает, поэтому зеркало ничего не путает."""
+    a = predict(model, x, dev)
+    b = predict(model, np.ascontiguousarray(np.asarray(x)[..., ::-1]), dev)[..., ::-1]
+    return (a + b) / 2
+
+
 def fit_channels(x, cin):
     """(B,C,S,S) или (C,S,S) -> ровно cin каналов (для смеси моделей/данных v1 и v2)."""
     c = x.shape[-3]

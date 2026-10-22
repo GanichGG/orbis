@@ -24,8 +24,10 @@ ROOT_MOTION = True
 LOOK_DIST = 3.0
 LIMB_RULE = True          # правило аниматора: рука R6 = предплечье (локоть→кисть), нога R6 = голень (колено→стопа);
                           # работает, если в файле есть локти/колени (Orbis v2), иначе — LEG_MODE ниже
-DETACH = 1.0              # 1 — блок руки/ноги R6 сдвигается так, что его конец ровно в кисти/стопе стикмена
+DETACH = 1.0              # 1 — блок руки/ноги R6 сдвигается так, что его конец в кисти/стопе стикмена
                           # (через кости *_Positioner); 0 — блоки прибиты к плечу/тазу, как раньше
+MAX_OFFSET = 1.0          # «разумное расстояние»: блок отходит от плеча/таза не дальше стольких шпилек (None — без предела)
+TURNS = True              # разворот персонажа посреди ролика (по коленям, facing_frames): поворот корня на 180°
 LEG_MODE = "plant"        # без локтей/колен: "plant" — стопы в реальных точках, колено гнётся (стопы не скользят)
                           # "straight" — R6-нога точно по линии таз→стопа (поза как у стикмена, без сгиба)
 KEYS_ONLY = True          # ключи только на ключевых кадрах из файла
@@ -89,6 +91,26 @@ def aim_fk(obj, name, d, axis):
 
 
 _PREV = {}
+
+
+def rotate_about_head(obj, name, q):
+    """Повернуть кость так, чтобы в пространстве арматуры она была повёрнута на q относительно покоя
+    (вокруг своей головы). Учитывает повороты родителей — нужно при развороте корня."""
+    pb = obj.pose.bones[name]
+    set_rotation(pb, Quaternion())
+    update()
+    M = ev(obj).pose.bones[name].matrix.copy()
+    t = M.translation.copy()
+    N = q.to_matrix().to_4x4() @ Matrix.Translation(-t) @ M
+    N.translation = t
+    pb.matrix = N
+    if pb.rotation_mode == "QUATERNION":
+        prev = _PREV.get(name)
+        qq = pb.rotation_quaternion.copy()
+        if prev is not None and qq.dot(prev) < 0:
+            qq.negate()
+            pb.rotation_quaternion = qq
+        _PREV[name] = qq
 
 
 def update():
@@ -190,8 +212,31 @@ def apply_character(obj, ch, data, frame_start=1):
         d = (F[f][J["hip"]][0] - F[f - 1][J["hip"]][0], F[f][J["hip"]][1] - F[f - 1][J["hip"]][1])
         root.append(root[-1] + to3d(d, k_root / T_px[f]))
 
+    # разворот: направление по кадрам (по коленям) -> сгладить, короткие куски (< 8 кадров) не считать
+    turned = [False] * n
+    fz = ch.get("facing_frames")
+    if TURNS and side == "side" and fz and len(fz) == n:
+        cur, raw = sgn, []
+        for v in fz:
+            cur = v if v != 0 else cur
+            raw.append(cur)
+        sm = [1.0 if sum(raw[max(0, f - 4):f + 5]) >= 0 else -1.0 for f in range(n)]
+        f = 0
+        while f < n:
+            e = f
+            while e + 1 < n and sm[e + 1] == sm[f]:
+                e += 1
+            if e - f + 1 < 8 and f > 0:
+                for k in range(f, e + 1):
+                    sm[k] = sm[f - 1]
+            f = e + 1
+        turned = [v != sgn for v in sm]
+        if any(turned):
+            print("stick2r6 IK: разворотов:", sum(1 for f in range(1, n) if turned[f] != turned[f - 1]))
+    flips = {g for f in range(1, n) if turned[f] != turned[f - 1] for g in (f - 1, f)}
+
     if KEYS_ONLY and ch.get("keys"):
-        frames = sorted(set().union(*[set(v) for v in ch["keys"].values()]) | {0, n - 1})
+        frames = sorted(set().union(*[set(v) for v in ch["keys"].values()]) | {0, n - 1} | flips)
     else:
         frames = list(range(n))
 
@@ -271,12 +316,18 @@ def apply_character(obj, ch, data, frame_start=1):
         down = IA.matrix_world.inverted().to_3x3() @ Vector((0, 0, -1))
         return to_rig @ (pb.matrix @ bone.matrix_local.inverted() @ (bone.head_local + down))
 
+    m_rest = B[CTRL["master"]].matrix_local.to_quaternion()
     for f in frames:
-        # 1) наклон торса: поворот в плоскости вокруг нормали
+        # 0) разворот: корень на 180° вокруг вертикали (камера та же — точки в мире не меняются)
+        set_rotation(pbs["master"], m_rest.inverted() @ Quaternion((0, 0, 1), math.pi) @ m_rest if turned[f] else Quaternion())
+        # 1) наклон торса: поворот в плоскости вокруг нормали (в мире; с учётом разворота корня)
         dt = to3d((F[f][J["neck"]][0] - F[f][J["hip"]][0], F[f][J["neck"]][1] - F[f][J["hip"]][1])).normalized()
         ang = math.atan2(axis.dot(up.cross(dt)), up.dot(dt))
         R = Quaternion(axis, ang)
-        set_rotation(torso_pb, t_rest.inverted() @ R @ t_rest)
+        if any(turned):
+            rotate_about_head(obj, tname, R)
+        else:
+            set_rotation(torso_pb, t_rest.inverted() @ R @ t_rest)
         # 2) MasterControl так, чтобы таз оказался в нужной точке
         solve_locations(obj, {CTRL["master"]: hip_r + root[f]}, lambda e, nm: e.pose.bones[REF["hip"]].head)
         e = ev(obj)
@@ -338,17 +389,26 @@ def apply_character(obj, ch, data, frame_start=1):
         if mode["head"] == "fk":
             aim_fk(obj, FK["head"], uh, axis)
         if pos_ok:
-            # 4) конец блока R6 — в кисть/стопу стикмена (в масштабе рига); боковой отступ блока сохраняем
+            # 4) конец блока R6 — в кисть/стопу стикмена (в масштабе рига), но не дальше MAX_OFFSET от «прибитого»
+            #    положения (у плеча/таза); боковой отступ блока сохраняем
+            for p in POS_PART:
+                obj.pose.bones[p].location = (0, 0, 0)
+            update()
             want = {}
             for key, (pos, part, _) in POS.items():
                 v = (F[f][J[key]][0] - F[f][J["hip"]][0], F[f][J[key]][1] - F[f][J["hip"]][1])
                 tgt = hip_now() + to3d(v, s_rig / T_px[f])
                 cur = r6_end(part)
                 tgt.x = cur.x
-                want[pos] = cur + (tgt - cur) * DETACH
+                off = (tgt - cur) * DETACH
+                if MAX_OFFSET is not None and off.length > MAX_OFFSET:
+                    off *= MAX_OFFSET / off.length
+                want[pos] = cur + off
             solve_locations(obj, want, lambda e, nm: r6_end(POS_PART[nm]))
         fr = frame_start + f
         pbs["master"].keyframe_insert("location", frame=fr)
+        if any(turned):
+            pbs["master"].keyframe_insert(rot_path(pbs["master"]), frame=fr)
         torso_pb.keyframe_insert(rot_path(torso_pb), frame=fr)
         for key in ("l_hand", "r_hand", "l_foot", "r_foot"):
             if mode[key] == "ik":
