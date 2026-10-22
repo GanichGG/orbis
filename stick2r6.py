@@ -29,6 +29,7 @@ import colorseg as CS          # noqa: E402
 import pipeline as PL          # noqa: E402
 import track2 as T             # noqa: E402
 import postprocess as PP       # noqa: E402
+import motion as MO            # noqa: E402
 from model import load, device  # noqa: E402
 
 JOINTS = T.JOINTS
@@ -126,12 +127,15 @@ def main():
     ap.add_argument("--view", default="side", choices=["side", "front"])
     ap.add_argument("--facing", default="")
     ap.add_argument("--smooth", type=int, default=5)
-    ap.add_argument("--keys", type=float, default=4.0, help="допуск ключевых кадров в градусах (0 — ключ на каждом кадре)")
+    ap.add_argument("--keys", type=float, default=10.0, help="допуск промежуточных ключей в градусах (0 — ключ на каждом кадре)")
+    ap.add_argument("--old_keys", action="store_true", help="старый выбор ключей (RDP по углам), без событий")
     ap.add_argument("--no_plant", action="store_true", help="не фиксировать стопы на земле")
     w_def = os.path.join(HERE, "weights", "orbis.pt")
     ap.add_argument("--weights", default=w_def if os.path.exists(w_def) else os.path.join(HERE, "weights", "stickpose.pt"))
     ap.add_argument("--finetune_every", type=int, default=0, help="дообучать сеть после каждых N ответов (0 — авто: 4 на видеокарте, 10 на процессоре)")
     ap.add_argument("--quiet", type=int, default=2)
+    ap.add_argument("--ask_mode", default="keys", choices=["keys", "doubt"],
+                    help="keys — сначала ключевые позы (удары, замахи, крайние), потом спорные; doubt — только спорные")
     ap.add_argument("--ask", type=int, default=0, help="вопросов про спорные кадры на персонажа (0 — кадров/12, не меньше 10)")
     ap.add_argument("--fresh", action="store_true")
     a = ap.parse_args()
@@ -252,13 +256,37 @@ def main():
     budget = a.ask or max(10, n // 12)
     asked_c = [0] * nc
     asked = 0
+
+    def key_pose_queue():
+        """Ключевые позы (удары, замахи, приземления, крайние...) — их точность важнее всего для анимации.
+        Порядок: важность события + сомнение трекера; рядом с уже размеченным не спрашиваем."""
+        Ps = [MO.fix_swaps(results[k]["P"], results[k]["T"], results[k]["anchors"])[0] for k in range(nc)]
+        q = []
+        for k in range(nc):
+            ev, _ = MO.detect(Ps[k], results[k]["T"], results[k]["cuts"], [Ps[j] for j in range(nc) if j != k])
+            for x in ev:
+                if MO.IMPORTANCE[x["type"]] >= 3:
+                    q.append((MO.IMPORTANCE[x["type"]] + min(3.0, float(results[k]["sev"][x["f"]])), k, x["f"],
+                              MO.RU[x["type"]]))
+        return sorted(q, reverse=True)
+
+    key_share = 0.7 if a.ask_mode == "keys" else 0.0   # доля бюджета на ключевые позы, остальное — на спорные
+    queue = key_pose_queue() if key_share else []
     while True:
-        w = T.worst_frame([r if asked_c[k] < budget else None for k, r in enumerate(results)])
+        w, reason = None, ""
+        while queue:
+            sc, c, f, name = queue.pop(0)
+            near = any(abs(f - g) <= max(1, a.quiet) for g in list(labels[c]) + list(skipped[c]))
+            if not near and asked_c[c] < budget * key_share:
+                w, reason = (sc, c, f), f"ключевая поза: {name}"
+                break
+        if w is None:
+            w = T.worst_frame([r if asked_c[k] < budget else None for k, r in enumerate(results)])
         if w is None:
             log(f"Вопросы закончились (задано: {asked}; бюджет {budget} на персонажа, больше — --ask).")
             break
         _, c, f = w
-        reason = "; ".join(dict.fromkeys(results[c]["why"][f])) or "низкая уверенность"
+        reason = reason or "; ".join(dict.fromkeys(results[c]["why"][f])) or "низкая уверенность"
         st = ask(c, f, reason, f"[вопрос {asked_c[c] + 1}/{budget}]")
         asked_c[c] += 1
         if st == "close":
@@ -270,6 +298,8 @@ def main():
         if retrain:
             since_ft = [0] * nc
         refresh(c, retrain)
+        if retrain and key_share:   # сеть дообучилась — позы и события могли сдвинуться
+            queue = key_pose_queue()
 
     # ---- ШАГ 3: проверка ----
     f0 = 0
@@ -288,10 +318,25 @@ def main():
     facing = [s.strip() for s in a.facing.split(",") if s.strip()]
     out = {"format": "stick2r6", "version": 2, "fps": video.fps, "view": a.view, "start": a.start,
            "frame_size": [video[0].shape[1], video[0].shape[0]], "characters": []}
+    # события движения всех персонажей (для «удар в противника» нужны траектории остальных)
+    base = []
+    for c in range(nc):
+        Pc, nfix = MO.fix_swaps(results[c]["P"], results[c]["T"], results[c]["anchors"])
+        if nfix:
+            log(f"Персонаж {c + 1}: исправлено перескоков рук/ног: {nfix}")
+        base.append(Pc)
+    events, holds = [], []
+    for c in range(nc):
+        ev, ho = MO.detect(base[c], results[c]["T"], results[c]["cuts"], [base[k] for k in range(nc) if k != c])
+        events.append(ev)
+        holds.append(ho)
+    MO.link_hits(events, base, [results[c]["T"] for c in range(nc)])
     for c in range(nc):
         r = results[c]
-        P = r["P"].copy()
-        if a.smooth and a.smooth >= 3 and n > a.smooth:
+        P = base[c].copy()
+        if not a.old_keys and a.smooth:   # без одиночных выбросов и шума; разметка — как есть
+            P = MO.clean(P, r["cuts"], r["anchors"], a.smooth if a.smooth % 2 else a.smooth + 1)
+        elif a.smooth and a.smooth >= 3 and n > a.smooth:
             from scipy.signal import savgol_filter
             w = a.smooth if a.smooth % 2 else a.smooth + 1
             cuts = [0] + r["cuts"] + [n]
@@ -299,12 +344,17 @@ def main():
                 if s1 - s0 > w:
                     P[s0:s1] = savgol_filter(P[s0:s1], w, 2, axis=0, mode="interp")
             for f in r["anchors"]:
-                P[f] = r["P"][f]
+                P[f] = base[c][f]
         contacts, keys = {}, None
         if not a.no_plant:
             P, contacts = PP.plant_feet(P, r["T"], r["cuts"])
-        if a.keys > 0:
+        key_frames, interp = None, None
+        if a.keys > 0 and a.old_keys:
             keys = PP.keyframes(P, r["T"], r["cuts"], r["anchors"], tol_deg=a.keys)
+        elif a.keys > 0:  # от позы к позе: события + разметка + промежуточные по дуге
+            key_frames, interp = MO.keyframes(P, r["T"], r["cuts"], events[c], holds[c], r["anchors"],
+                                              {"breakdown_deg": a.keys})
+            keys = {name: key_frames for name in PP.PARTS} | {"Root": key_frames}
         fz = PP.facing(P, r["T"])   # куда смотрит (по коленям) в каждом кадре
         auto = "r" if fz.sum() >= 0 else "l"
         if c >= len(facing):
@@ -313,7 +363,15 @@ def main():
               "facing_frames": fz.tolist(),
               "joints": JOINTS, "frames": np.round(P, 2).tolist(), "labeled": r["anchors"],
               "cuts": r["cuts"], "torso_px": np.round(r["T"], 2).tolist(),
-              "contacts": {JOINTS[j]: v for j, v in contacts.items()}}
+              "contacts": {JOINTS[j]: v for j, v in contacts.items()},
+              "events": [dict(x, name=MO.RU[x["type"]]) for x in events[c]]}
+        if key_frames is not None:
+            ch["key_frames"] = key_frames
+            ch["interp"] = {str(k): v for k, v in interp.items()}
+            kinds = {}
+            for x in events[c]:
+                kinds[MO.RU[x["type"]]] = kinds.get(MO.RU[x["type"]], 0) + 1
+            log(f"Персонаж {c + 1}: события — " + (", ".join(f"{k} {v}" for k, v in kinds.items()) or "нет"))
         if keys:
             ch["keys"] = keys
             log(f"Персонаж {c + 1}: ключей на часть ~{int(np.mean([len(v) for v in keys.values()]))} из {n} кадров")

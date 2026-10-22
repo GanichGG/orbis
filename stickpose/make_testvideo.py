@@ -63,7 +63,7 @@ def main(out_prefix, n=120, seed=7):
         z *= 1.0 + (0.006 if 25 <= f < 45 else 0.0)
         cams.append((z, cx, cy))
     vw = cv2.VideoWriter(out_prefix + ".mp4", cv2.VideoWriter_fourcc(*"mp4v"), FPS, (W, H))
-    GT = np.zeros((n, 2, 7, 2), np.float32)
+    GT = np.zeros((n, 2, 11, 2), np.float32)
     for f in range(n):
         z, cx, cy = cams[f]
         world = bg.copy()

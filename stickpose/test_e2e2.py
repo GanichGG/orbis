@@ -41,7 +41,7 @@ def pick_colors(get, nf, preview, sample, start=0):
 def label_frame(frame, cand, est, title, reason, ci, progress=""):
     stats["asked"] += 1
     f = int(title.split("кадр ")[1].split("/")[0]) - 1
-    g = GT[f, ci]
+    g = GT[f, ci, :7]
     if est is not None:
         e = np.array([est[j] for j in J])
         T = np.linalg.norm(g[1] - g[2])
@@ -73,7 +73,7 @@ import track2  # noqa: E402
 
 for ci in range(nc):
     P = res[ci]["P"][:, :7]
-    g = GT[:, ci]
+    g = GT[:, ci, :7]
     T = np.linalg.norm(g[:, 1] - g[:, 2], axis=1)
     e = np.linalg.norm(P - g, axis=2) / T[:, None]
     # углы частей R6 (направления сегментов)

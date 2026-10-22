@@ -85,6 +85,7 @@ def menu(cfg):
         ("добавить ролики", "add"), ("убрать ролик", "remove"),
         ("Анимация", None),
         ("разметить ролик → .r6.json", "label"), ("сравнить с R6 (видео)", "compare"),
+        ("оценить анимацию (0–10)", "anim"),
         ("Обучение", None),
         ("скачать базу движений (один раз)", "mocap"), ("самообучение по роликам", "self"),
         ("обучить на ночь", "train"), ("продолжить оборванное обучение", "resume"),
@@ -140,6 +141,11 @@ def main():
                 if ask("Начать заново? (д/н)", "н").lower().startswith(("д", "y")):
                     args.append("--fresh")
                 run(args)
+        elif k == "anim":
+            v = pick_video(cfg)
+            if v:
+                j = os.path.splitext(v[0])[0] + ".r6.json"
+                run(["tools/anim_check.py", j]) if os.path.exists(j) else input(f"{DIM}Сначала «разметить ролик». Enter{RST}")
         elif k == "compare":
             v = pick_video(cfg)
             if v:

@@ -11,8 +11,16 @@ import argparse
 import json
 import os
 
+import sys
+
 import cv2
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "stickpose"))
+import motion as MO  # noqa: E402
+
+EV_TXT = {"hit": "HIT", "got_hit": "GOT HIT", "windup": "WINDUP", "stop": "STOP", "extreme": "", "dash": "DASH",
+          "dash_end": "", "takeoff": "JUMP", "apex": "", "landing": "LAND", "hold": "HOLD", "hold_end": ""}
 
 J = {"head": 0, "neck": 1, "hip": 2, "l_hand": 3, "r_hand": 4, "l_foot": 5, "r_foot": 6,
      "l_elbow": 7, "r_elbow": 8, "l_knee": 9, "r_knee": 10}
@@ -102,9 +110,20 @@ def main():
             P = np.concatenate([P[:, :7], np.stack(mids, 1)], 1)
         T = np.array(ch.get("torso_px") or np.linalg.norm(P[:, J["neck"]] - P[:, J["hip"]], axis=1), float)
         A = angles(P)
-        keys = sorted(set().union(*[set(v) for v in ch["keys"].values()])) if ch.get("keys") and not a.all else range(n)
-        A2, hip2, T2 = interp_keys(A, P[:, J["hip"]], T, keys, n)
-        chars.append(dict(P=P, A=A2, hip=hip2, T=T2, keys=set(keys), facing=ch.get("facing", "r"), n=n))
+        if ch.get("key_frames") and not a.all:  # от позы к позе: интерполяция по смыслу, как в импорте
+            keys = ch["key_frames"]
+            Ps = MO.simulate(P, keys, {int(k): v for k, v in ch.get("interp", {}).items()})
+            A2, hip2, T2 = angles(Ps), Ps[:, J["hip"]], T
+            P = Ps
+        else:
+            keys = sorted(set().union(*[set(v) for v in ch["keys"].values()])) if ch.get("keys") and not a.all else range(n)
+            A2, hip2, T2 = interp_keys(A, P[:, J["hip"]], T, keys, n)
+        evs = {}
+        for x in ch.get("events", []):
+            if EV_TXT.get(x["type"]):
+                for g in range(x["f"], x["f"] + 4):
+                    evs.setdefault(g, EV_TXT[x["type"]])
+        chars.append(dict(P=P, A=A2, hip=hip2, T=T2, keys=set(keys), facing=ch.get("facing", "r"), n=n, ev=evs))
     n = max(c["n"] for c in chars)
 
     cap = cv2.VideoCapture(a.video)
@@ -130,6 +149,10 @@ def main():
             ends = None if a.attached else {"l_arm": p[J["l_hand"]], "r_arm": p[J["r_hand"]],
                                              "l_leg": p[J["l_foot"]], "r_leg": p[J["r_foot"]]}
             draw_r6(right, {k: v[f] for k, v in c["A"].items()}, c["hip"][f], c["T"][f], c["facing"], col, ends)
+            if f in c["ev"]:  # событие, как его понял Orbis
+                hp = tuple(np.round(c["hip"][f] + np.array([-30, -2.4 * c["T"][f]])).astype(int))
+                cv2.putText(right, c["ev"][f], hp, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 3, cv2.LINE_AA)
+                cv2.putText(right, c["ev"][f], hp, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
         key = any(f in c["keys"] for c in chars)
         cv2.putText(left, f"{f + start}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(left, f"{f + start}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 1, cv2.LINE_AA)

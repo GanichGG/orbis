@@ -31,8 +31,9 @@ TURNS = True              # разворот персонажа посреди �
 LEG_MODE = "plant"        # без локтей/колен: "plant" — стопы в реальных точках, колено гнётся (стопы не скользят)
                           # "straight" — R6-нога точно по линии таз→стопа (поза как у стикмена, без сгиба)
 KEYS_ONLY = True          # ключи только на ключевых кадрах из файла
-INTERP = "LINEAR"         # между ключами: "LINEAR" — как выбирались ключи (без замедлений у каждого ключа),
-                          # "BEZIER" — плавные кривые Blender, "CONSTANT" — ступеньками (покадровая анимация)
+INTERP = "LINEAR"         # между ключами (старые файлы без событий): "LINEAR" / "BEZIER" / "CONSTANT"
+                          # файлы с событиями (Orbis «от позы к позе») задают интерполяцию сами: плавно между
+                          # крайними позами, прямо в удар и в рывке, удержание в паузе
 
 FK = {"l_hand": "LeftArm_FK", "r_hand": "RightArm_FK", "head": "Head"}
 IK_OF = {"l_hand": "LeftLowerArm", "r_hand": "RightLowerArm", "l_foot": "LeftLowerLeg", "r_foot": "RightLowerLeg"}
@@ -220,13 +221,25 @@ def apply_character(obj, ch, data, frame_start=1):
         for v in fz:
             cur = v if v != 0 else cur
             raw.append(cur)
-        sm = [1.0 if sum(raw[max(0, f - 4):f + 5]) >= 0 else -1.0 for f in range(n)]
+        # голосование в окне ±7 кадров; новое направление — только при перевесе ≥ 70%, иначе держим прежнее
+        sm, prev = [], sgn
+        for f in range(n):
+            win = raw[max(0, f - 7):f + 8]
+            share = sum(1 for v in win if v == -prev) / len(win)
+            if share >= 0.7:
+                prev = -prev
+                g = f   # подтвердили позже — сам разворот там, где колени сменили сторону
+                while g - 1 >= max(0, f - 7) and raw[g - 1] == prev:
+                    g -= 1
+                sm[g:] = [prev] * (f - g)
+            sm.append(prev)
+        min_len = max(8, int(round(0.5 * data.get("fps", 30))))   # разворот держится хотя бы полсекунды
         f = 0
         while f < n:
             e = f
             while e + 1 < n and sm[e + 1] == sm[f]:
                 e += 1
-            if e - f + 1 < 8 and f > 0:
+            if e - f + 1 < min_len and f > 0:
                 for k in range(f, e + 1):
                     sm[k] = sm[f - 1]
             f = e + 1
@@ -235,7 +248,9 @@ def apply_character(obj, ch, data, frame_start=1):
             print("stick2r6 IK: разворотов:", sum(1 for f in range(1, n) if turned[f] != turned[f - 1]))
     flips = {g for f in range(1, n) if turned[f] != turned[f - 1] for g in (f - 1, f)}
 
-    if KEYS_ONLY and ch.get("keys"):
+    if KEYS_ONLY and ch.get("key_frames"):
+        frames = sorted(set(ch["key_frames"]) | {0, n - 1} | flips)
+    elif KEYS_ONLY and ch.get("keys"):
         frames = sorted(set().union(*[set(v) for v in ch["keys"].values()]) | {0, n - 1} | flips)
     else:
         frames = list(range(n))
@@ -427,8 +442,9 @@ def apply_character(obj, ch, data, frame_start=1):
     return frames
 
 
-def set_interp(obj, f0, f1):
-    """Интерполяция INTERP у поставленных ключей костей (keyframe_insert из Python её не задаёт)."""
+def set_interp(obj, f0, f1, per_key=None, frame_start=1):
+    """Интерполяция у поставленных ключей костей (keyframe_insert из Python её не задаёт):
+    per_key {кадр ролика: тип} — из файла (по событиям), иначе INTERP."""
     ad = obj.animation_data
     if not (ad and ad.action):
         return
@@ -444,7 +460,7 @@ def set_interp(obj, f0, f1):
         if len(m) > 1 and m[1] in keyed:
             for k in fc.keyframe_points:
                 if f0 <= k.co.x <= f1:
-                    k.interpolation = INTERP
+                    k.interpolation = (per_key or {}).get(int(round(k.co.x)) - frame_start, "BEZIER" if per_key else INTERP)
 
 
 def run(path):
@@ -470,7 +486,8 @@ def run(path):
     done = []
     for rig, ch in zip(rigs, chars):
         frames = apply_character(rig, ch, data)
-        set_interp(rig, frames[0] + 1, frames[-1] + 1)
+        set_interp(rig, frames[0] + 1, frames[-1] + 1,
+                   {int(k): v for k, v in ch["interp"].items()} if ch.get("interp") else None)
         done.append(f"{ch['name']} -> {rig.name}")
     scn.frame_start = 1
     scn.frame_end = max(len(c["frames"]) for c in chars)
