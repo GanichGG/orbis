@@ -74,6 +74,9 @@ def make(a):
                 break
             if st != "ok" or any(p.get(j) is None for j in T.JOINTS):
                 continue
+            if bad_gt(np.array([p[j] for j in T.JOINTS], float)):
+                print(f"кадр {f + 1}: левая и правая точка совпали — в экзамен не беру (разведите их)")
+                continue
             X.append(inputs[c][f][0])
             M.append(inputs[c][f][1])
             G.append([p[j] for j in T.JOINTS])
@@ -146,11 +149,19 @@ def load_exam():
     return [np.load(f) for f in files]
 
 
+def bad_gt(g, tol=3.0):
+    """Эталон с ошибкой: левая и правая кисть/локоть/стопа/колено в одной точке."""
+    return any(np.linalg.norm(g[J[a]] - g[J[b]]) < tol for a, b in
+               (("l_hand", "r_hand"), ("l_elbow", "r_elbow"), ("l_foot", "r_foot"), ("l_knee", "r_knee")))
+
+
 def exam_score(model, data):
     """-> (оценка 0..10, ошибки частей {часть: [°]}, точки {точка: [доля торса]})."""
     parts, pts = {}, {}
     for d in data:
         for x, Mx, g in zip(d["x"], d["M"], d["gt"]):
+            if bad_gt(g):
+                continue
             r, p = score(predict_points(model, x, Mx), g)
             for k in ("Торс", "Голова"):
                 parts.setdefault(k, []).append(r[k])

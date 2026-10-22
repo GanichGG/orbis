@@ -216,7 +216,22 @@ def pick_colors(get_frame, n_frames, segment_preview, sample, start=0):
                 return f, [[p[3].tolist() for p in c] for c in active], pts
 
 
+PAIRS_LR = (("l_hand", "r_hand"), ("l_elbow", "r_elbow"), ("l_foot", "r_foot"), ("l_knee", "r_knee"))
+
+
+def coincident(P, tol=3.0):
+    """Пары левая/правая, стоящие в одной точке (частая ошибка: приняли подсказку, где сеть нашла одну)."""
+    out = []
+    for a, b in PAIRS_LR:
+        pa, pb = P.get(a), P.get(b)
+        if pa is not None and pb is not None and np.hypot(pa[0] - pb[0], pa[1] - pb[1]) < tol:
+            out.append((a, b))
+    return out
+
+
 def _draw_skel(img, view, P, col, thick=2, labels=False):
+    for a, b in coincident(P):   # подсветить совпавшие точки — их надо развести
+        cv2.circle(img, view.to_disp(P[a]), 13, (60, 60, 255), 2, cv2.LINE_AA)
     for a, b in BONES:
         pa, pb = P.get(a), P.get(b)
         if pa is not None and pb is not None:
@@ -288,6 +303,9 @@ def label_frame(frame, cand, est, title, reason, char_idx, progress=""):
             if cur >= 0:
                 lines.append((f"Кликните: {JNAME[JOINTS[cur]]}.   Tab — следующая точка, Backspace — «не видно», Z — отмена", (120, 255, 160)))
             else:
+                if coincident(P):
+                    lines.append(("ВНИМАНИЕ: " + ", ".join(f"{JNAME[x].split()[-1].lower()} — обе точки в одном месте" for x, _ in coincident(P))
+                                  + ". Разведите их (перетащите одну) — иначе кадр не пойдёт в обучение.", (80, 80, 255)))
                 lines.append(("Перетащите неверные точки.  Enter — верно.  1-0,- — переставить точку кликом.  Q — поменять руки, W — ноги,  S — пропустить кадр,  Esc — хватит вопросов", (120, 255, 160)))
             img = view.compose(img_src, lines)
             _draw_skel(img, view, P, (255, 255, 255))

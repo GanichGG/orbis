@@ -139,9 +139,13 @@ def load_real(d):
                     mid = lambda a, b: (kp[:, a] + kp[:, b]) / 2
                     kp = np.concatenate([kp, np.stack([mid(1, 3), mid(1, 4), mid(2, 5), mid(2, 6)], 1)], 1)
                 out += list(zip(x, kp))
-    if out:  # защита: битые примеры (вне кадра, не числа) не берём
+    if out:  # защита: битые примеры (вне кадра, не числа, левая и правая в одной точке) не берём
         S = synth.S
-        good = [(x, k) for x, k in out if np.isfinite(k).any() and np.nanmax(np.abs(k)) < 3 * S]
+
+        def same_lr(k):
+            return any(np.isfinite(k[[a, b]]).all() and np.linalg.norm(k[a] - k[b]) < 1.5
+                       for a, b in ((3, 4), (7, 8), (5, 6), (9, 10)) if len(k) > 10)
+        good = [(x, k) for x, k in out if np.isfinite(k).any() and np.nanmax(np.abs(k)) < 3 * S and not same_lr(k)]
         if len(good) < len(out):
             print(f"  {d}: пропущено битых примеров {len(out) - len(good)}")
         out = good

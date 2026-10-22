@@ -90,6 +90,9 @@ def labels_to_samples(inputs, labels):
             continue
         if any(L.get(j) is None for j in J):
             continue
+        if any(L.get(a) is not None and L.get(b) is not None and np.hypot(*np.subtract(L[a], L[b])) < 3.0
+               for a, b in (("l_hand", "r_hand"), ("l_elbow", "r_elbow"), ("l_foot", "r_foot"), ("l_knee", "r_knee"))):
+            continue  # левая и правая в одной точке — ошибка разметки, не учим
         pts = [L[j] for j in J]
         for j, (a, b) in (("l_elbow", ("neck", "l_hand")), ("r_elbow", ("neck", "r_hand")),
                           ("l_knee", ("hip", "l_foot")), ("r_knee", ("hip", "r_foot"))):

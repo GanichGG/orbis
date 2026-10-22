@@ -105,16 +105,26 @@ def guess_from_model(fc):
         return None
     pk = fc["peaks"]
     g = {"head": pk["head"][0][:2], "neck": pk["neck"][0][:2], "hip": pk["hip"][0][:2]}
-    hands = pk["hands"][:2] + pk["hands"][:1]
-    feet = pk["feet"][:2] + pk["feet"][:1]
-    g["l_hand"], g["r_hand"] = hands[0][:2], hands[1][:2]
-    g["l_foot"], g["r_foot"] = feet[0][:2], feet[1][:2]
-    # локти/колени: ближайший пик сети к середине своей конечности (у модели v1 их нет — середина)
-    for j, root, end, ch in (("l_elbow", "neck", "l_hand", "elbows"), ("r_elbow", "neck", "r_hand", "elbows"),
-                             ("l_knee", "hip", "l_foot", "knees"), ("r_knee", "hip", "r_foot", "knees")):
-        mid = (np.asarray(g[root]) + np.asarray(g[end])) / 2
-        c = [p[:2] for p in pk.get(ch, [])]
-        g[j] = min(c, key=lambda q: np.hypot(q[0] - mid[0], q[1] - mid[1])) if c else mid
+    torso = max(8.0, float(np.hypot(*np.subtract(g["neck"], g["hip"]))))
+    for (l, r), ch in ((("l_hand", "r_hand"), "hands"), (("l_foot", "r_foot"), "feet")):
+        c = [np.asarray(p[:2], float) for p in pk[ch][:2]]
+        if len(c) < 2:  # сеть нашла одну — вторую рядом, но отдельно (в одну точку пользователь их не примет)
+            c.append(c[0] + [0.25 * torso, 0.0])
+        g[l], g[r] = c[0], c[1]
+    # локти/колени: каждому концу конечности — свой пик (не один на двоих); нет пика — середина конечности
+    for (jl, jr), root, (el, er), ch in ((("l_elbow", "r_elbow"), "neck", ("l_hand", "r_hand"), "elbows"),
+                                         (("l_knee", "r_knee"), "hip", ("l_foot", "r_foot"), "knees")):
+        mids = [(np.asarray(g[root]) + np.asarray(g[e])) / 2 for e in (el, er)]
+        c = [np.asarray(p[:2], float) for p in pk.get(ch, [])[:2]]
+        if len(c) == 2:
+            same = np.hypot(*(c[0] - mids[0])) + np.hypot(*(c[1] - mids[1]))
+            swap = np.hypot(*(c[1] - mids[0])) + np.hypot(*(c[0] - mids[1]))
+            g[jl], g[jr] = (c[0], c[1]) if same <= swap else (c[1], c[0])
+        elif len(c) == 1:
+            k = int(np.argmin([np.hypot(*(c[0] - m)) for m in mids]))
+            g[(jl, jr)[k]], g[(jl, jr)[1 - k]] = c[0], mids[1 - k]
+        else:
+            g[jl], g[jr] = mids
     return {k: [float(v[0]), float(v[1])] for k, v in g.items()}
 
 
@@ -129,6 +139,7 @@ def main():
     ap.add_argument("--smooth", type=int, default=5)
     ap.add_argument("--keys", type=float, default=10.0, help="допуск промежуточных ключей в градусах (0 — ключ на каждом кадре)")
     ap.add_argument("--old_keys", action="store_true", help="старый выбор ключей (RDP по углам), без событий")
+    ap.add_argument("--edit", action="store_true", help="«правка кадра»: кость держит позу, пока не сдвинется заметнее шума")
     ap.add_argument("--no_plant", action="store_true", help="не фиксировать стопы на земле")
     w_def = os.path.join(HERE, "weights", "orbis.pt")
     ap.add_argument("--weights", default=w_def if os.path.exists(w_def) else os.path.join(HERE, "weights", "stickpose.pt"))
@@ -340,6 +351,8 @@ def main():
         P = base[c].copy()
         if not a.old_keys and a.smooth:   # без одиночных выбросов и шума; разметка — как есть
             P = MO.clean(P, r["cuts"], r["anchors"], a.smooth if a.smooth % 2 else a.smooth + 1)
+        if a.edit:
+            P = MO.edit_filter(P, r["T"], r["cuts"], r["anchors"])
         elif a.smooth and a.smooth >= 3 and n > a.smooth:
             from scipy.signal import savgol_filter
             w = a.smooth if a.smooth % 2 else a.smooth + 1

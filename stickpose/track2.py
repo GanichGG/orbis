@@ -97,7 +97,11 @@ def track(frames_c, labels, n, cfg=None, skipped=()):
     "feat": вектор силуэта} — координаты в пикселях кадра.
     labels: {кадр: {сустав: [x,y] | None}}."""
     cfg = {**CFG, **(cfg or {})}
-    labels = {int(k): v for k, v in labels.items() if 0 <= int(k) < n}
+    labels = {int(k): dict(v) for k, v in labels.items() if 0 <= int(k) < n}
+    for L in labels.values():  # левая и правая в одной точке — ошибка разметки: эти точки считаем неизвестными
+        for a, b in (("l_hand", "r_hand"), ("l_elbow", "r_elbow"), ("l_foot", "r_foot"), ("l_knee", "r_knee")):
+            if L.get(a) is not None and L.get(b) is not None and np.hypot(*np.subtract(L[a], L[b])) < 3.0:
+                L[a] = L[b] = None
     if not labels:
         return None
     anchors = sorted(labels)

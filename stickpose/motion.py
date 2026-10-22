@@ -238,6 +238,44 @@ def link_hits(events, Ps, Ts, contact=CFG["contact"]):
     return events
 
 
+def edit_filter(P, T, cuts=(), labeled=(), k=2.5, min_deg=3.0, root_tol=0.03):
+    """«Правка кадра», как у аниматора: каждая кость держит прошлое положение, пока её изменение не превысит
+    обычный шум сети; сдвинулась только рука — правится только рука. Порог по каждой кости свой: k × шум
+    (оценён по отклонению от медианы соседних кадров), но не меньше min_deg. Разметка и смены плана — как есть."""
+    n = len(P)
+    if n < 3:
+        return P.copy()
+    lab, cutset = set(int(f) for f in labeled), set(int(c) for c in cuts)
+    hip = P[:, J["hip"]].copy()
+    ang, ln = [], []
+    for a, b in CHAIN:
+        v = P[:, J[b]] - P[:, J[a]]
+        ang.append(np.unwrap(np.arctan2(v[:, 1], v[:, 0])))
+        ln.append(np.linalg.norm(v, axis=1))
+    ang, ln = np.stack(ang, 1), np.stack(ln, 1)
+
+    def noise(y):
+        med = np.median(np.stack([np.r_[y[:1], y[:-1]], y, np.r_[y[1:], y[-1:]]]), 0)
+        return 1.4826 * np.median(np.abs(y - med), 0)
+    thr_a = np.maximum(np.radians(min_deg), k * noise(ang))
+    thr_l = np.maximum(0.05 * np.median(ln, 0), k * noise(ln))
+    out_a, out_l, out_h = ang.copy(), ln.copy(), hip.copy()
+    for f in range(1, n):
+        if f in lab or f in cutset:
+            continue
+        keep = np.abs(ang[f] - out_a[f - 1]) < thr_a
+        out_a[f, keep] = out_a[f - 1, keep]
+        keep = np.abs(ln[f] - out_l[f - 1]) < thr_l
+        out_l[f, keep] = out_l[f - 1, keep]
+        if np.linalg.norm(hip[f] - out_h[f - 1]) < root_tol * T[f]:
+            out_h[f] = out_h[f - 1]
+    out = np.zeros_like(P)
+    out[:, J["hip"]] = out_h
+    for c, (a, b) in enumerate(CHAIN):
+        out[:, J[b]] = out[:, J[a]] + np.stack([np.cos(out_a[:, c]), np.sin(out_a[:, c])], 1) * out_l[:, c:c + 1]
+    return out
+
+
 def keyframes(P, T, cuts, events, holds, labeled=(), cfg=None):
     """Ключи «от позы к позе»: события + разметка + границы планов, затем промежуточные ключи там, где без них
     дуга части уйдёт дальше допуска, и не реже max_gap. -> (кадры, {кадр: интерполяция сегмента после него})."""
