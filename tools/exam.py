@@ -185,6 +185,15 @@ def run(a):
               f"частей точнее 15°: {(allp < 15).mean() * 100:.0f}%; Epigram — от 7)")
         print("  части R6: " + ",  ".join(f"{k} {np.mean(v):.1f}°" for k, v in parts.items()))
         print("  точки ближе 10% торса: " + ",  ".join(f"{k} {(np.array(v) < 0.1).mean() * 100:.0f}%" for k, v in pts.items()))
+        if a.frames:
+            print("  по кадрам (кадр: торс/голова/руки/ноги, °):")
+            model = load(w, device())
+            for d in data:
+                for m, x, Mx, g in zip(d["meta"], d["x"], d["M"], d["gt"]):
+                    if bad_gt(g):
+                        continue
+                    r, _ = score(predict_points(model, x, Mx), g)
+                    print(f"    {str(m).split(':')[1]:>5}: {r['Торс']:5.1f} {r['Голова']:5.1f} {r['Руки']:5.1f} {r['Ноги']:5.1f}")
 
 
 def main():
@@ -198,6 +207,7 @@ def main():
     m.add_argument("--weights", default=os.path.join(ROOT, "weights", "orbis.pt"))
     r = sub.add_parser("run")
     r.add_argument("weights", nargs="+")
+    r.add_argument("--frames", action="store_true", help="ошибки по каждому кадру")
     a = ap.parse_args()
     make(a) if a.cmd == "make" else run(a)
 
